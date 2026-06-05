@@ -1,0 +1,38 @@
+name: bundle-check
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  check:
+    name: Bundle size check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/bun-action@v2
+        with:
+          bun-version: stable
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Generate mangled mapping
+        run: bun --cwd packages/web run generate-mangled
+
+      - name: Build web package
+        run: bun --cwd packages/web run build
+
+      - name: Run size check
+        run: bun --cwd packages/web run size
+
+      - name: Upload visualizers
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: visualizers
+          path: packages/web/dist/visualizer*.html
