@@ -2,6 +2,7 @@
   "name": "@wince/core",
   "version": "0.0.1",
   "private": true,
+  "sideEffects": false,
   "type": "module",
   "main": "./dist/index.esm.js",
   "module": "./dist/index.esm.js",

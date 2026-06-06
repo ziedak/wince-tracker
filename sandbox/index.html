@@ -21,7 +21,7 @@
     <script>
       const out = document.getElementById('result');
       try {
-        const W = window.Wince ?? window.WinceCore ?? window.WinceUtils ?? {};
+        const W = window.Wince ?? {};
         const coreVal = typeof W.core === 'function' ? W.core() : 'n/a';
         out.innerHTML = `<pre>core(): ${coreVal}</pre>`;
         console.log('Wince global:', W);

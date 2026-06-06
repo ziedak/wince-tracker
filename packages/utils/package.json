@@ -2,6 +2,7 @@
   "name": "@wince/utils",
   "version": "0.0.1",
   "private": true,
+  "sideEffects": false,
   "type": "module",
   "main": "./dist/index.esm.js",
   "module": "./dist/index.esm.js",
@@ -14,6 +15,6 @@
       "import": "./dist/index.esm.js",
       "default": "./dist/index.esm.js"
     }
-  },
-  "dependencies": {}
+  }
+ 
 }

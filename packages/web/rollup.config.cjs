@@ -6,7 +6,8 @@ const commonjs = require('@rollup/plugin-commonjs');
 const _esbuildPkg = require('rollup-plugin-esbuild');
 const esbuild =
   _esbuildPkg && _esbuildPkg.default ? _esbuildPkg.default : _esbuildPkg;
-const { terser } = require('rollup-plugin-terser');
+const _terserPkg = require('@rollup/plugin-terser');
+const terser = _terserPkg && _terserPkg.default ? _terserPkg.default : _terserPkg;
 
 let visualizer;
 try {
@@ -47,14 +48,21 @@ const aliasPlugin = (() => {
   return alias({ entries });
 })();
 
+const { version: pkgVersion } = require('./package.json');
+const BANNER = `/*! @wince/web v${pkgVersion} | MIT */`;
+
 const basePluginsNoTerser = [
   aliasPlugin,
-  // Ensure .ts files are resolved when importing from the aliased sources
+  // Resolve node_modules; also honour the @wince/source export condition
+  // as a secondary path (alias plugin above wins for @wince/* packages).
   resolve({
     extensions: ['.ts', '.tsx', '.mjs', '.js', '.json'],
     browser: true,
     preferBuiltins: false,
+    exportConditions: ['@wince/source', 'module', 'browser', 'import', 'default'],
   }),
+  // Convert CJS deps to ESM before esbuild transpiles them
+  commonjs(),
   // Use esbuild to transpile TypeScript (works for files outside this tsconfig)
   esbuild({
     include: /\.([jt]s|tsx?)$/,
@@ -62,13 +70,16 @@ const basePluginsNoTerser = [
     target: 'es2020',
     tsconfig: path.resolve(__dirname, 'tsconfig.lib.json'),
   }),
-  // Convert any CommonJS dependencies to ES modules after TS compilation
-  commonjs(),
 ];
 
-const terserDefault = terser();
+const terserDefault = terser({
+  compress: { ecma: 2020, passes: 2 },
+  format: { ecma: 2020 },
+});
+
 const terserLite = terser({
-  compress: { passes: 2 },
+  compress: { ecma: 2020, passes: 3 },
+  format: { ecma: 2020 },
   mangle: {
     properties: {
       // only mangle internal names starting with underscore
@@ -101,13 +112,14 @@ if (process.env.ANALYZE && visualizer) {
 const baseConfig = {
   input: 'src/index.ts',
   output: [
-    { file: 'dist/index.esm.js', format: 'es', sourcemap: true },
-    { file: 'dist/index.cjs.js', format: 'cjs', sourcemap: true },
+    { file: 'dist/index.esm.js', format: 'es', sourcemap: true, banner: BANNER },
+    { file: 'dist/index.cjs.js', format: 'cjs', sourcemap: true, banner: BANNER },
     {
       file: 'dist/index.umd.js',
       format: 'umd',
       name: 'Wince',
       sourcemap: true,
+      banner: BANNER,
     },
     // Also write the UMD bundle directly into the sandbox vendor folder
     {
@@ -122,25 +134,31 @@ const baseConfig = {
       format: 'umd',
       name: 'Wince',
       sourcemap: true,
+      banner: BANNER,
     },
   ],
   // Important: do not treat workspace libraries as external so Rollup
   // will inline `@wince/core` and its dependencies into the single bundle.
   external: [],
   plugins: basePlugins,
-  treeshake: true,
+  treeshake: {
+    moduleSideEffects: false,
+    propertyReadSideEffects: false,
+    unknownGlobalSideEffects: false,
+  },
 };
 
 const liteConfig = {
   input: 'src/index.lite.ts',
   output: [
-    { file: 'dist/index.lite.esm.js', format: 'es', sourcemap: true },
-    { file: 'dist/index.lite.cjs.js', format: 'cjs', sourcemap: true },
+    { file: 'dist/index.lite.esm.js', format: 'es', sourcemap: true, banner: BANNER },
+    { file: 'dist/index.lite.cjs.js', format: 'cjs', sourcemap: true, banner: BANNER },
     {
       file: 'dist/index.lite.umd.js',
       format: 'umd',
       name: 'WinceLite',
       sourcemap: true,
+      banner: BANNER,
     },
     // Also write the lite UMD bundle into sandbox vendor for testing
     {
@@ -155,11 +173,16 @@ const liteConfig = {
       format: 'umd',
       name: 'WinceLite',
       sourcemap: true,
+      banner: BANNER,
     },
   ],
   external: [],
   plugins: litePlugins,
-  treeshake: true,
+  treeshake: {
+    moduleSideEffects: false,
+    propertyReadSideEffects: false,
+    unknownGlobalSideEffects: false,
+  },
 };
 
 module.exports = [baseConfig, liteConfig];

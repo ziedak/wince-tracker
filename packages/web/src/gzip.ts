@@ -7,7 +7,11 @@ function toUint8Array(input: Uint8Array | ArrayBuffer | string): Uint8Array {
   if ((input as any).buffer && (input as any).byteLength !== undefined) {
     // TypedArray view
     const view = input as ArrayBufferView & { buffer: ArrayBuffer };
-    return new Uint8Array(view.buffer, (view as any).byteOffset || 0, (view as any).byteLength || view.buffer.byteLength);
+    return new Uint8Array(
+      view.buffer,
+      (view as any).byteOffset || 0,
+      (view as any).byteLength || view.buffer.byteLength,
+    );
   }
   throw new TypeError('Unsupported input type for gzip');
 }
@@ -18,7 +22,7 @@ const CRC32_TABLE = (() => {
   for (let n = 0; n < 256; n++) {
     let c = n;
     for (let k = 0; k < 8; k++) {
-      c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
     }
     table[n] = c >>> 0;
   }
@@ -47,11 +51,13 @@ function validateNativeGzip(out: Uint8Array, original: Uint8Array): boolean {
   const isizeFromFile = getUint32LE(out, out.length - 4);
   const computed = crc32(original);
   if (crcFromFile !== computed) return false;
-  if ((isizeFromFile >>> 0) !== (original.length >>> 0)) return false;
+  if (isizeFromFile >>> 0 !== original.length >>> 0) return false;
   return true;
 }
 
-export default async function gzip(input: Uint8Array | ArrayBuffer | string): Promise<Uint8Array> {
+export default async function gzip(
+  input: Uint8Array | ArrayBuffer | string,
+): Promise<Uint8Array> {
   const u8 = toUint8Array(input as any);
 
   // Try native CompressionStream if available (browser / Bun) and validate
@@ -66,14 +72,14 @@ export default async function gzip(input: Uint8Array | ArrayBuffer | string): Pr
       if (validateNativeGzip(out, u8)) return out;
       // else: fall through to JS fallback
     } catch (e) {
+      console.warn(
+        '[wince] gzip: native CompressionStream failed, falling back to JS gzipSync',
+        e,
+      );
       // ignore and fallback
     }
   }
 
   // Fallback: use fflate's gzipSync
-  try {
-    return gzipSync(u8);
-  } catch (err) {
-    throw err;
-  }
+  return gzipSync(u8);
 }
