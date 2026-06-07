@@ -44,11 +44,29 @@
         "typescript-eslint": "^8.40.0",
       },
     },
+    "packages/compress": {
+      "name": "@wince/compress",
+      "version": "0.0.1",
+      "dependencies": {
+        "fflate": "^0.8.3",
+      },
+    },
     "packages/core": {
       "name": "@wince/core",
       "version": "0.0.1",
       "dependencies": {
         "@wince/utils": "workspace:*",
+      },
+    },
+    "packages/observability": {
+      "name": "@wince/observability",
+      "version": "0.0.1",
+    },
+    "packages/transport": {
+      "name": "@wince/transport",
+      "version": "0.0.1",
+      "dependencies": {
+        "@wince/compress": "workspace:*",
       },
     },
     "packages/utils": {
@@ -59,9 +77,10 @@
       "name": "@wince/web",
       "version": "0.0.1",
       "dependencies": {
+        "@wince/compress": "workspace:*",
         "@wince/core": "workspace:*",
+        "@wince/transport": "workspace:*",
         "@wince/utils": "workspace:*",
-        "fflate": "^0.8.3",
       },
       "devDependencies": {
         "rollup-plugin-visualizer": "^6.0.3",
@@ -823,7 +842,13 @@
 
     "@webassemblyjs/wast-printer": ["@webassemblyjs/wast-printer@1.14.1", "", { "dependencies": { "@webassemblyjs/ast": "1.14.1", "@xtuc/long": "4.2.2" } }, "sha512-kPSSXE6De1XOR820C90RIo2ogvZG+c3KiHzqUoO/F34Y2shGzesfqv7o57xrxovZJH/MetF5UjroJ/R/3isoiw=="],
 
+    "@wince/compress": ["@wince/compress@workspace:packages/compress"],
+
     "@wince/core": ["@wince/core@workspace:packages/core"],
+
+    "@wince/observability": ["@wince/observability@workspace:packages/observability"],
+
+    "@wince/transport": ["@wince/transport@workspace:packages/transport"],
 
     "@wince/utils": ["@wince/utils@workspace:packages/utils"],
 

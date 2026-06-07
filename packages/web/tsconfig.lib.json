@@ -3,6 +3,7 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
     "declaration": true,
     "declarationMap": false,
     "module": "ESNext",
@@ -11,5 +12,19 @@
     "moduleResolution": "Bundler",
     "skipLibCheck": true
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*.ts"],
+  "references": [
+    {
+      "path": "../utils/tsconfig.lib.json"
+    },
+    {
+      "path": "../core/tsconfig.lib.json"
+    }
+  ],
+  "exclude": [
+    "jest.config.ts",
+    "jest.config.cts",
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts"
+  ]
 }

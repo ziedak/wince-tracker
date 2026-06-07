@@ -8,6 +8,18 @@
     },
     {
       "path": "./packages/utils"
+    },
+    {
+      "path": "./packages/transport"
+    },
+    {
+      "path": "./packages/compress"
+    },
+    {
+      "path": "./packages/web"
+    },
+    {
+      "path": "./packages/observability"
     }
   ]
 }

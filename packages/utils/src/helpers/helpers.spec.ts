@@ -1,4 +1,4 @@
-import { utils } from './utils';
+import { utils } from '.';
 
 describe('utils', () => {
   it('should work', () => {

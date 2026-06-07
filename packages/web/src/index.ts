@@ -4,6 +4,8 @@
 
 export * from '@wince/core';
 
+export { createDefaultTransport } from './transport';
+
 
 // If you want a minimal runtime (no extra exports), explicitly
 // export what you need here instead of star-exporting.
