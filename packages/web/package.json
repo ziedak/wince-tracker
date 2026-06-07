@@ -39,6 +39,8 @@
     "@wince/core": "workspace:*",
     "@wince/utils": "workspace:*",
     "@wince/transport": "workspace:*",
-    "@wince/compress": "workspace:*"
+    "@wince/compress": "workspace:*",
+    "@wince/consent": "workspace:*",
+    "@wince/storage": "workspace:*"
   }
 }

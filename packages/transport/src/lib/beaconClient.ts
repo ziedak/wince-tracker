@@ -17,7 +17,7 @@ export class BeaconClient implements HTTPClient {
       try {
         let payload: any;
         if (typeof body === 'string') payload = body;
-        else payload = new Blob([body]);
+        else payload = new Blob([body as BlobPart]);
         const ok = (navigator as any).sendBeacon(url, payload);
         return { ok: !!ok, status: ok ? 200 : 0 };
       } catch (e) {

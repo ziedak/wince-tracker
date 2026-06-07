@@ -1,11 +1,11 @@
 # See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
-
+ARCHITECTURE.md
 # compiled output
 dist
 tmp
 out-tsc
-vendor
-
+*/vendor
+vendor/index.umd.*
 # dependencies
 node_modules
 

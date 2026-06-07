@@ -44,28 +44,6 @@ export function deepFreeze<T>(obj: T): T {
   return Object.freeze(obj);
 }
 
-export function deepClone<T>(obj: T): T {
-  if (obj === null || typeof obj !== 'object') {
-    return obj;
-  }
-
-  if (isArray(obj)) {
-    return (obj as unknown[]).map((v) => deepClone(v)) as unknown as T;
-  }
-
-  if (!isObject(obj)) {
-    // Not a plain object (e.g., Date, Map) — return as-is
-    return obj;
-  }
-
-  const clonedObj: { [key: string]: unknown } = {};
-  Object.keys(obj as Record<string, unknown>).forEach((key) => {
-    clonedObj[key] = deepClone((obj as Record<string, unknown>)[key]);
-  });
-
-  return clonedObj as T;
-}
-
 export function deepMerge<T>(target: T, source: Partial<T>): T {
   if (source === null || typeof source !== 'object') {
     return target;

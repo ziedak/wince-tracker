@@ -1,4 +1,4 @@
-import { gzipSync } from 'fflate';
+import { gzipSync, gunzipSync } from 'fflate';
 
 function toUint8Array(input: Uint8Array | ArrayBuffer | string): Uint8Array {
   if (typeof input === 'string') return new TextEncoder().encode(input);
@@ -86,3 +86,19 @@ export async function compress(
 }
 
 export default compress;
+
+/**
+ * Synchronously gzip-compress `input` using fflate.
+ * Use this on the page-unload path (pagehide) where async is not allowed.
+ */
+export function compressSync(input: Uint8Array | ArrayBuffer | string): Uint8Array {
+  return gzipSync(toUint8Array(input as any));
+}
+
+/**
+ * Synchronously gunzip `input` using fflate.
+ * Use this to decompress events replayed from IndexedDB on startup.
+ */
+export function decompressSync(input: Uint8Array | ArrayBuffer): Uint8Array {
+  return gunzipSync(toUint8Array(input as any));
+}

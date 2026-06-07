@@ -17,22 +17,46 @@ export function backoffDelay(
   return Math.round(delay * (0.5 + rand / 2));
 }
 
+export interface WithRetriesOptions {
+  /** Number of total attempts (including the first). Default: 3 */
+  attempts?: number;
+  /** Return false to stop retrying immediately and rethrow. Default: always retry. */
+  retryCheck?: (err: unknown) => boolean;
+  /** Called after each failed attempt (useful for logging). */
+  onAttempt?: (err: unknown, attempt: number) => void;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  factor?: number;
+  jitter?: boolean;
+}
+
 export async function withRetries<T>(
   fn: () => Promise<T>,
-  attempts = 3,
-  onAttempt?: (err: any, attempt: number) => void,
+  attemptsOrOpts: number | WithRetriesOptions = 3,
+  onAttempt?: (err: unknown, attempt: number) => void,
   delayOpts?: Parameters<typeof backoffDelay>[1],
 ): Promise<T> {
-  let lastErr: any;
+  // Accept both the legacy positional signature and the new options object.
+  const opts: WithRetriesOptions =
+    typeof attemptsOrOpts === 'number'
+      ? { attempts: attemptsOrOpts, onAttempt, ...delayOpts }
+      : attemptsOrOpts;
+
+  const attempts   = opts.attempts   ?? 3;
+  const retryCheck = opts.retryCheck ?? (() => true);
+  const notify     = opts.onAttempt  ?? onAttempt;
+
+  let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
       return await fn();
     } catch (err) {
       lastErr = err;
-      onAttempt?.(err, i + 1);
+      notify?.(err, i + 1);
+      if (!retryCheck(err)) throw err;
       if (i < attempts - 1) {
-        const wait = backoffDelay(i, delayOpts);
-        await new Promise((res) => setTimeout(res, wait));
+        const wait = backoffDelay(i, opts);
+        await new Promise<void>((res) => setTimeout(res, wait));
       }
     }
   }

@@ -1,11 +1,6 @@
-// Entry point for the browser bundle. Re-export the public API
-// from `@wince/core`. Rollup will resolve and inline its dependencies
-// (like `@wince/utils`) so the final UMD contains everything.
+// Browser SDK entry point.
 
 export * from '@wince/core';
-
+export { WinceClient, init } from './client';
+export type { WinceConfig } from './client';
 export { createDefaultTransport } from './transport';
-
-
-// If you want a minimal runtime (no extra exports), explicitly
-// export what you need here instead of star-exporting.

@@ -10,6 +10,7 @@
     "lint:fix": "nx lint --fix",
     "format": "nx format:write",
     "test": "nx test",
+    "test:skip-cache": "bun nx run-many -t test --skip-nx-cache",
     "build:all": "bun nx run-many --target=build --all",
     "dev": "bunx concurrently \"bunx nx watch --all -- echo \\$NX_PROJECT_NAME\" \"bunx live-server . --port=8000\"",
     "build:web": "cd packages/web && bun run build",
@@ -47,7 +48,9 @@
     "esbuild": "^0.28.0",
     "eslint": "^9.8.0",
     "eslint-config-prettier": "^10.0.0",
+    "fake-indexeddb": "6",
     "jest": "~30.3.0",
+    "jest-environment-jsdom": "^30.4.1",
     "jest-environment-node": "~30.3.0",
     "jest-util": "~30.3.0",
     "jsonc-eslint-parser": "^2.1.0",
@@ -64,6 +67,7 @@
     "typescript-eslint": "^8.40.0"
   },
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "packages/observability/packages/*"
   ]
 }

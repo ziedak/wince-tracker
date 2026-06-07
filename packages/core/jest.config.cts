@@ -1,5 +1,6 @@
 /* eslint-disable */
 const { readFileSync } = require('fs');
+const nxPreset = require('@nx/jest/preset').default;
 
 // Reading the SWC compilation config for the spec files
 const swcJestConfig = JSON.parse(
@@ -10,8 +11,9 @@ const swcJestConfig = JSON.parse(
 swcJestConfig.swcrc = false;
 
 module.exports = {
+  ...nxPreset,
   displayName: '@wince/core',
-  preset: '../../jest.preset.js',
+
   testEnvironment: 'node',
   transform: {
     '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig],
