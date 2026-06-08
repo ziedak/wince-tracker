@@ -51,18 +51,18 @@ Before importing, identify whether the source is an **application** or a **libra
 
 **Destination directory rules**:
 
-- Applications → `apps/<name>`. Check workspace globs (e.g. `bun-workspace.yaml`, `workspaces` in root `package.json`) for an existing `apps/*` entry.
+- Applications → `apps/<name>`. Check workspace globs (e.g. `pnpm-workspace.yaml`, `workspaces` in root `package.json`) for an existing `apps/*` entry.
   - If `apps/*` is **not** present, add it before importing: update the workspace glob config and commit (or stage) the change.
   - Example: `nx import <source> apps/my-app --source=packages/my-app`
 - Libraries → follow the dest's existing convention (`packages/`, `libs/`, etc.).
 
 ## Common Issues
 
-### bun Workspace Globs (Critical)
+### pnpm Workspace Globs (Critical)
 
-`nx import` adds the imported directory itself (e.g. `apps`) to `bun-workspace.yaml`, **NOT** glob patterns for packages within it. Cross-package imports will fail with `Cannot find module`.
+`nx import` adds the imported directory itself (e.g. `apps`) to `pnpm-workspace.yaml`, **NOT** glob patterns for packages within it. Cross-package imports will fail with `Cannot find module`.
 
-**Fix**: Replace with proper globs from the source config (e.g. `apps/*`, `libs/shared/*`), then `bun install`.
+**Fix**: Replace with proper globs from the source config (e.g. `apps/*`, `libs/shared/*`), then `pnpm install`.
 
 ### Root Dependencies and Config Not Imported (Critical)
 
@@ -93,8 +93,8 @@ Inferred targets (via Nx plugins) resolve config relative to project root — no
 
 Whole-repo import brings ALL source root files into the dest subdirectory. Clean up:
 
-- `bun-lock.yaml` — stale; dest has its own lockfile
-- `bun-workspace.yaml` — source workspace config; conflicts with dest
+- `pnpm-lock.yaml` — stale; dest has its own lockfile
+- `pnpm-workspace.yaml` — source workspace config; conflicts with dest
 - `node_modules/` — stale symlinks pointing to source filesystem
 - `.gitignore` — redundant with dest root `.gitignore`
 - `nx.json` — source Nx config; dest has its own
@@ -108,25 +108,25 @@ Subdirectory import doesn't bring the source's root `eslint.config.mjs`, but pro
 
 **Fix order**:
 
-1. Install ESLint deps first: `bun add -wD eslint@^9 @nx/eslint-plugin typescript-eslint` (plus framework-specific plugins)
+1. Install ESLint deps first: `pnpm add -wD eslint@^9 @nx/eslint-plugin typescript-eslint` (plus framework-specific plugins)
 2. Create root `eslint.config.mjs` (copy from source or create with `@nx/eslint-plugin` base rules)
 3. Then `npx nx add @nx/eslint` to register the plugin in `nx.json`
 
-Install `typescript-eslint` explicitly — bun's strict hoisting won't auto-resolve this transitive dep of `@nx/eslint-plugin`.
+Install `typescript-eslint` explicitly — pnpm's strict hoisting won't auto-resolve this transitive dep of `@nx/eslint-plugin`.
 
 ### ESLint Version Pinning (Critical)
 
 **Pin ESLint to v9** (`eslint@^9.0.0`). ESLint 10 breaks `@nx/eslint` and many plugins with cryptic errors like `Cannot read properties of undefined (reading 'version')`.
 
-`@nx/eslint` may peer-depend on ESLint 8, causing the wrong version to resolve. If lint fails with `Cannot read properties of undefined (reading 'allow')`, add `bun.overrides`:
+`@nx/eslint` may peer-depend on ESLint 8, causing the wrong version to resolve. If lint fails with `Cannot read properties of undefined (reading 'allow')`, add `pnpm.overrides`:
 
 ```json
-{ "bun": { "overrides": { "eslint": "^9.0.0" } } }
+{ "pnpm": { "overrides": { "eslint": "^9.0.0" } } }
 ```
 
 ### Dependency Version Conflicts
 
-After import, compare key deps (`typescript`, `eslint`, framework-specific). If dest uses newer versions, upgrade imported packages to match (usually safe). If source is newer, may need to upgrade dest first. Use `bun.overrides` to enforce single-version policy if desired.
+After import, compare key deps (`typescript`, `eslint`, framework-specific). If dest uses newer versions, upgrade imported packages to match (usually safe). If source is newer, may need to upgrade dest first. Use `pnpm.overrides` to enforce single-version policy if desired.
 
 ### Module Boundaries
 
@@ -134,11 +134,11 @@ Imported projects may lack `tags`. Add tags or update `@nx/enforce-module-bounda
 
 ### Project Name Collisions (Multi-Import)
 
-Same `name` in `package.json` across source and dest causes `MultipleProjectsWithSameNameError`. **Fix**: Rename conflicting names (e.g. `@wince/api` → `@wince/teama-api`), update all dep references and import statements, `bun install`. The root `package.json` of each imported repo also becomes a project — rename those too.
+Same `name` in `package.json` across source and dest causes `MultipleProjectsWithSameNameError`. **Fix**: Rename conflicting names (e.g. `@org/api` → `@org/teama-api`), update all dep references and import statements, `pnpm install`. The root `package.json` of each imported repo also becomes a project — rename those too.
 
 ### Workspace Dep Import Ordering
 
-`bun install` fails during `nx import` if a `"workspace:*"` dependency hasn't been imported yet. File operations still succeed. **Fix**: Import all projects first, then `bun install --no-frozen-lockfile`.
+`pnpm install` fails during `nx import` if a `"workspace:*"` dependency hasn't been imported yet. File operations still succeed. **Fix**: Import all projects first, then `pnpm install --no-frozen-lockfile`.
 
 ### `.gitkeep` Blocking Subdirectory Import
 
@@ -163,7 +163,7 @@ If the dest also has backend projects needing `nodenext`, use per-project overri
 
 React libraries generated with `@nx/react:library` reference `@nx/react/typings/cssmodule.d.ts` and `@nx/react/typings/image.d.ts` in their tsconfig `types`. These fail with `Cannot find type definition file` unless `@nx/react` is installed in the dest workspace.
 
-**Fix**: `bun add -wD @nx/react`
+**Fix**: `pnpm add -wD @nx/react`
 
 ### Jest Preset Missing (Subdirectory Import)
 
@@ -173,7 +173,7 @@ Nx presets create `jest.preset.js` at the workspace root, and project jest confi
 
 1. Run `npx nx add @nx/jest` — registers `@nx/jest/plugin` in `nx.json` and updates `namedInputs`
 2. Create `jest.preset.js` at workspace root (see `references/JEST.md` for content) — `nx add` only creates this when a generator runs, not on bare `nx add`
-3. Install test runner deps: `bun add -wD jest jest-environment-jsdom ts-jest @types/jest`
+3. Install test runner deps: `pnpm add -wD jest jest-environment-jsdom ts-jest @types/jest`
 4. Install framework-specific test deps as needed (see `references/JEST.md`)
 
 For deeper Jest issues (tsconfig.spec.json, Babel transforms, CI atomization, Jest vs Vitest coexistence), see `references/JEST.md`.
@@ -189,7 +189,7 @@ When importing a project with existing npm scripts (`build`, `dev`, `start`, `li
 
 ## Non-Nx Source Issues
 
-When the source is a plain bun/npm workspace without `nx.json`.
+When the source is a plain pnpm/npm workspace without `nx.json`.
 
 ### npm Script Rewriting (Critical)
 
@@ -210,9 +210,9 @@ Plain TS projects use `"noEmit": true`, incompatible with Nx project references.
 
 ### Stale node_modules and Lockfiles
 
-`nx import` may bring `node_modules/` (bun symlinks pointing to the source filesystem) and `bun-lock.yaml` from the source. Both are stale.
+`nx import` may bring `node_modules/` (pnpm symlinks pointing to the source filesystem) and `pnpm-lock.yaml` from the source. Both are stale.
 
-**Fix**: `rm -rf imported/node_modules imported/bun-lock.yaml imported/bun-workspace.yaml imported/.gitignore`, then `bun install`.
+**Fix**: `rm -rf imported/node_modules imported/pnpm-lock.yaml imported/pnpm-workspace.yaml imported/.gitignore`, then `pnpm install`.
 
 ### ESLint Config Handling
 
@@ -222,7 +222,7 @@ Plain TS projects use `"noEmit": true`, incompatible with Nx project references.
 
 ### TypeScript `paths` Aliases
 
-Nx uses `package.json` `"exports"` + bun workspace linking instead of tsconfig `"paths"`. If packages have proper `"exports"`, paths are redundant. Otherwise, update paths for the new directory structure.
+Nx uses `package.json` `"exports"` + pnpm workspace linking instead of tsconfig `"paths"`. If packages have proper `"exports"`, paths are redundant. Otherwise, update paths for the new directory structure.
 
 ## Technology-specific Guidance
 

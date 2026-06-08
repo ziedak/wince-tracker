@@ -1,6 +1,6 @@
 ## ESLint
 
-ESLint-specific guidance for `nx import`. For generic import issues (root deps, bun globs, project references), see `SKILL.md`.
+ESLint-specific guidance for `nx import`. For generic import issues (root deps, pnpm globs, project references), see `SKILL.md`.
 
 ---
 
@@ -72,7 +72,7 @@ When a project uses `eslint.config.cjs` (CJS flat config), `eslint .` lints the 
 module.exports = tseslint.config(
   {
     ignores: ['dist/**', 'node_modules/**', 'eslint.config.cjs'],
-  }
+  },
   // ...
 );
 ```

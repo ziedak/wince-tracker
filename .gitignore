@@ -1,4 +1,15 @@
 # See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
+# ai
+.codex
+.claude
+.opencode
+.agents
+.github/agents
+.github/prompts
+.github/skills
+CLAUDE.md
+opencode.json
+
 ARCHITECTURE.md
 # compiled output
 dist
@@ -53,3 +64,6 @@ test-output
 # AI assistant config
 CLAUDE.md
 opencode.json
+sandbox/vendor/
+sandbox/vendor/
+.agents/skills/

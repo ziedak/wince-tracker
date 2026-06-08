@@ -1,12 +1,13 @@
 import { uuidv4, isValidUuid } from './uuid';
-import type { MinimalStore } from './types';
+import type { MinimalStore, PersonProps } from './types';
 
 // ============================================================================
 // IdentityManager
 // ============================================================================
 
-const ANON_KEY = 'wince_anon';
-const UID_KEY  = 'wince_uid';
+const ANON_KEY      = 'wince_anon';
+const UID_KEY       = 'wince_uid';
+const PREV_ANON_KEY = 'wince_prev_anon';
 
 export interface IdentityManagerOptions {
   /**
@@ -25,9 +26,11 @@ export interface IdentityManagerOptions {
  * - **User ID**: Set by calling `identify(uid)`. Cleared on `reset()`.
  */
 export class IdentityManager {
-  private readonly _store?: MinimalStore;
+  private _store?: MinimalStore;
   private _anonId: string;
   private _userId: string | undefined;
+  /** Previous anonymous ID — set on reset(), cleared after the first event. */
+  private _prevAnonId: string | undefined;
 
   constructor(opts: IdentityManagerOptions = {}) {
     this._store = opts.store;
@@ -44,6 +47,14 @@ export class IdentityManager {
     // Load identified user ID if previously set.
     const uid = this._store?.get(UID_KEY);
     if (uid) this._userId = uid;
+
+    // Load the prev-anon ID if a reset happened on a previous page and hasn't
+    // been consumed yet (one-shot: delete from store immediately after loading).
+    const prevAnon = this._store?.get(PREV_ANON_KEY);
+    if (prevAnon && isValidUuid(prevAnon)) {
+      this._prevAnonId = prevAnon;
+      this._store?.delete?.(PREV_ANON_KEY);
+    }
   }
 
   /** The persistent anonymous device/browser ID. */
@@ -55,20 +66,47 @@ export class IdentityManager {
   /**
    * Associate a known user identity with this device.
    * Persists to the store so subsequent page loads keep the association.
+   * Optional `traits` are passed through to the backend — not stored client-side.
    */
-  identify(uid: string): void {
+  identify(uid: string, traits?: PersonProps): void {
     this._userId = uid;
     this._store?.set(UID_KEY, uid);
+    void traits; // traits are not stored; callers decide what to do with them
   }
 
   /**
    * Generate a new anonymous ID and clear the identified user ID.
    * Use on explicit log-out to break the link between device and user.
+   * Saves the current anon ID as `PREV_ANON_KEY` so the next page load
+   * can include `anon_prev` on the first event for identity stitching.
    */
   reset(): void {
+    this._store?.set(PREV_ANON_KEY, this._anonId); // persist for next page load
+    this._prevAnonId  = this._anonId;              // available in-session too
     this._anonId  = uuidv4();
     this._userId  = undefined;
     this._store?.set(ANON_KEY, this._anonId);
     this._store?.delete?.(UID_KEY);
+  }
+
+  /**
+   * Returns the previous anonymous ID (set by the last `reset()` call) and
+   * clears it so it only appears on the very first event after the reset.
+   * Returns `undefined` if no reset has occurred.
+   */
+  getAndClearAnonPrev(): string | undefined {
+    const prev = this._prevAnonId;
+    this._prevAnonId = undefined;
+    return prev;
+  }
+
+  /**
+   * Attach a persistent store and immediately write current in-memory state.
+   * Called when cookieless `on_reject` mode transitions to consent GRANTED.
+   */
+  migrateToStore(store: MinimalStore): void {
+    this._store = store;
+    store.set(ANON_KEY, this._anonId);
+    if (this._userId) store.set(UID_KEY, this._userId);
   }
 }

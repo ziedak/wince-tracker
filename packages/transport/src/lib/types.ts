@@ -2,6 +2,19 @@ export interface EventPayload {
   [key: string]: unknown;
 }
 
+/**
+ * Reasons an event or batch can be permanently dropped (or blocked from delivery).
+ * Surfaced via the `onEventDropped` callback in WinceConfig.
+ */
+export type DropReason =
+  | 'consent'       // consent not granted
+  | 'sampling'      // sampler rejected the event
+  | 'rate_limit'    // token bucket exhausted
+  | 'quota'         // server 429 quota signal
+  | 'too_large'     // single event exceeds server size limit
+  | 'buffer_full'   // maxBufferSize exceeded — oldest event evicted
+  | 'client_dedup'; // identical event fired again within the dedup TTL window
+
 export interface TransportOptions {
   url: string;
   batchSize?: number;
@@ -27,5 +40,18 @@ export interface TransportOptions {
     factor?: number;
     jitter?: boolean;
   };
+  /**
+   * Called when an event is permanently lost or blocked from delivery.
+   * `item` is the raw event payload; may be absent for pre-enqueue drops.
+   */
+  onDropped?: (reason: DropReason, item?: EventPayload) => void;
+  /** Called after each HTTP batch is successfully delivered. */
+  onBatchDelivered?: (eids: string[]) => void;
+  /**
+   * Priority scorer used during `drain()` to sort events before packing.
+   * Higher scores are packed into beacons first.
+   * Default: insertion order (all events equal priority).
+   */
+  eventPriority?: (event: EventPayload) => number;
 }
 

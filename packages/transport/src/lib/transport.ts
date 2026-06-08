@@ -3,6 +3,17 @@ import { Exporter } from './exporter';
 import { HttpSender } from './httpSender';
 import type { EventPayload, TransportOptions } from './types';
 
+const SCHEMA_VERSION = 1;
+
+function buildEnvelope(batch: EventPayload[]): string {
+  const sent_at = Date.now();
+  const events = batch.map((e) => {
+    const ts = typeof e['ts'] === 'number' ? (e['ts'] as number) : sent_at;
+    return { ...e, offset: sent_at - ts, schema_v: SCHEMA_VERSION };
+  });
+  return JSON.stringify({ sent_at, events });
+}
+
 export class Transport {
   private readonly _exporter: Exporter<EventPayload>;
   private readonly _url: string;
@@ -27,8 +38,7 @@ export class Transport {
     this._exporter = new Exporter<EventPayload>({
       sender,
       encode: async (batch) => {
-        const payload = JSON.stringify(batch);
-        // compressSync accepts strings directly — no need to pre-encode to Uint8Array.
+        const payload = buildEnvelope(batch);
         return this._useCompression ? compressSync(payload) : payload;
       },
       batchSize:       opts.batchSize      ?? 10,
@@ -41,6 +51,16 @@ export class Transport {
         factor:      opts.retry?.factor,
         jitter:      opts.retry?.jitter,
       },
+      onDropped: opts.onDropped,
+      onBatchDelivered: opts.onBatchDelivered
+        ? (items) => {
+            const eids = items
+              .map((e) => (typeof e['eid'] === 'string' ? (e['eid'] as string) : null))
+              .filter((id): id is string => id !== null);
+            if (eids.length > 0) opts.onBatchDelivered!(eids);
+          }
+        : undefined,
+      priorityFn: opts.eventPriority,
     });
 
     if (opts.paused) {
@@ -51,6 +71,9 @@ export class Transport {
   send(event: EventPayload): void {
     this._exporter.enqueue(event);
   }
+
+  get queueSize(): number    { return this._exporter.queueSize; }
+  get circuitOpen(): boolean { return this._exporter.circuitOpen; }
 
   /**
    * Resume automatic flushing. Call after consent is confirmed or
@@ -66,6 +89,14 @@ export class Transport {
    */
   pause(): void {
     this._exporter.pause();
+  }
+
+  /**
+   * Dynamically update batch size and flush interval.
+   * Use for network-quality adaptation — call when `navigator.connection.effectiveType` changes.
+   */
+  updateBatchConfig(batchSize: number, batchTimeoutMs: number): void {
+    this._exporter.updateBatchConfig(batchSize, batchTimeoutMs);
   }
 
   /**
@@ -85,7 +116,7 @@ export class Transport {
 
     const url = this._url;
     this._exporter.drain({
-      encodeSync: (batch) => JSON.stringify(batch),
+      encodeSync: (batch) => buildEnvelope(batch),
       send: (data) => {
         const type = typeof data === 'string' ? 'application/json' : 'application/octet-stream';
         (navigator as Navigator & { sendBeacon: (u: string, b: Blob) => boolean })

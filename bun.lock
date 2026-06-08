@@ -94,6 +94,7 @@
       "name": "@wince/web",
       "version": "0.0.1",
       "dependencies": {
+        "@wince/cache": "workspace:*",
         "@wince/compress": "workspace:*",
         "@wince/consent": "workspace:*",
         "@wince/core": "workspace:*",

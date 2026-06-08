@@ -24,12 +24,46 @@ export interface TrackEvent {
   uid?: string;
   /** Arbitrary event-specific properties. */
   props?: Record<string, unknown>;
+  /**
+   * Person properties merged into the user record on every occurrence.
+   * Backend applies these as a deep merge: last write wins per key.
+   */
+  $set?: Record<string, unknown>;
+  /**
+   * Person properties written only if the key is not already present on the
+   * backend user record. Useful for first-touch attribution (e.g. first_seen_at).
+   */
+  $set_once?: Record<string, unknown>;
   /** `document.URL` at capture time. */
   url?: string;
   /** `document.referrer` at capture time. */
   ref?: string;
+  /** Per-tab identifier (UUID v4, sessionStorage-scoped). Separates multi-tab flows. */
+  window_id?: string;
+  /** Identifier for the current page view (UUID v7). Set by WinceClient.page(). */
+  pageview_id?: string;
+  /** Identifier of the previous page view — present only on `$page_view` events. */
+  prev_pageview_id?: string;
+  /**
+   * Previous anonymous ID — present only on the first event after `reset()`.
+   * Allows the backend to stitch the pre-reset and post-reset device histories.
+   */
+  anon_prev?: string;
+  /** Clock-skew correction: `sent_at - ts` in ms, set by Transport at encode time. */
+  offset?: number;
+  /** Schema version, set by Transport at encode time. Used for IDB migration. */
+  schema_v?: number;
   /** Allow arbitrary extra fields for forward-compat / custom enrichment. */
   [key: string]: unknown;
+}
+
+/**
+ * Person-level traits that can accompany any event or identify call.
+ * Passed through to the backend without client-side processing.
+ */
+export interface PersonProps {
+  $set?:      Record<string, unknown>;
+  $set_once?: Record<string, unknown>;
 }
 
 /**
@@ -54,4 +88,9 @@ export interface MinimalStore {
   get(key: string): string | null;
   set(key: string, value: string): void;
   delete?(key: string): void;
+  /**
+   * Synchronous read–modify–write on a single key.
+   * When available, `SessionManager` uses this to avoid cross-tab clobber.
+   */
+  refreshKey?(key: string, updater: (current: string | null) => string): void;
 }

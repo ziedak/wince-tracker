@@ -185,4 +185,24 @@ const liteConfig = {
   },
 };
 
-module.exports = [baseConfig, liteConfig];
+const workerConfig = {
+  input: 'src/worker/tracker.worker.ts',
+  output: [
+    {
+      file: 'dist/tracker.worker.js',
+      format: 'iife',
+      name: '_WinceWorker', // IIFE wrapper name (not exported)
+      sourcemap: true,
+      banner: BANNER,
+    },
+  ],
+  external: [],
+  plugins: [...basePluginsNoTerser, terserDefault],
+  treeshake: {
+    moduleSideEffects: false,
+    propertyReadSideEffects: false,
+    unknownGlobalSideEffects: false,
+  },
+};
+
+module.exports = [baseConfig, liteConfig, workerConfig];

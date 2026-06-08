@@ -31,8 +31,44 @@ function makeClient(overrides: Partial<WinceConfig> = {}) {
 async function getFirstBatch(client: WinceClient, fetchFn: jest.Mock) {
   await client.flush();
   expect(fetchFn).toHaveBeenCalled();
-  return JSON.parse(fetchFn.mock.calls[0][1].body as string) as TrackEvent[];
+  const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as { events: TrackEvent[] };
+  return envelope.events;
 }
+
+// ---------------------------------------------------------------------------
+// page()
+// ---------------------------------------------------------------------------
+
+describe('WinceClient — page()', () => {
+  it('emits a $page_view event', async () => {
+    const fetchFn = makeFetch();
+    const client  = makeClient({ fetch: fetchFn });
+    client.page();
+    const [ev] = await getFirstBatch(client, fetchFn);
+    expect(ev.t).toBe('$page_view');
+    await client.close();
+  });
+
+  it('merges caller props into the page view event', async () => {
+    const fetchFn = makeFetch();
+    const client  = makeClient({ fetch: fetchFn });
+    client.page({ section: 'checkout' });
+    const [ev] = await getFirstBatch(client, fetchFn);
+    expect(ev.t).toBe('$page_view');
+    expect((ev.props as Record<string, unknown>)?.section).toBe('checkout');
+    await client.close();
+  });
+
+  it('increments seq like any other event', async () => {
+    const fetchFn = makeFetch();
+    const client  = makeClient({ fetch: fetchFn });
+    client.track('first');
+    client.page();
+    const batch = await getFirstBatch(client, fetchFn);
+    expect(batch[1].seq).toBe(1);
+    await client.close();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // track()

@@ -40,11 +40,13 @@ export class HttpSender {
 
     let res: Response;
     try {
+      const bodySize = typeof body === 'string' ? body.length : body.byteLength;
       res = await this._fetchFn(this._endpoint, {
-        method:  'POST',
-        headers: { ...this._headers, ...extraHeaders } as Record<string, string>,
-        body:    body as BodyInit,
-        signal:  ctrl.signal,
+        method:    'POST',
+        headers:   { ...this._headers, ...extraHeaders } as Record<string, string>,
+        body:      body as BodyInit,
+        signal:    ctrl.signal,
+        keepalive: bodySize < 51 * 1024,
       });
     } catch {
       clearTimeout(timer);

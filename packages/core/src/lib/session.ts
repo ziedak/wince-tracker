@@ -5,8 +5,10 @@ import type { MinimalStore } from './types';
 // SessionManager
 // ============================================================================
 
-const SESSION_KEY       = 'wince_session';
-const DEFAULT_IDLE_MS   = 30 * 60 * 1_000; // 30 minutes
+const SESSION_KEY                    = 'wince_session';
+const DEFAULT_IDLE_MS                = 30 * 60 * 1_000;        // 30 minutes
+const DEFAULT_MAX_DUR_MS             = 24 * 60 * 60 * 1_000;   // 24 hours
+const ACTIVITY_PERSIST_GRANULARITY_MS = 5_000;                  // 5 seconds
 
 interface SessionState {
   sid:          string;
@@ -30,6 +32,12 @@ export interface SessionManagerOptions {
    */
   idleTimeoutMs?: number;
   /**
+   * Hard cap on session duration regardless of activity (ms).
+   * A tab left open overnight will start a new session after this limit.
+   * Default: 24 hours.
+   */
+  maxDurationMs?: number;
+  /**
    * Optional persistent store. When omitted, session state lives in memory
    * only and is lost on page refresh. Pass a `LocalStore` or `CookieStore`
    * from `@wince/storage` in production.
@@ -49,11 +57,14 @@ export interface SessionManagerOptions {
  */
 export class SessionManager {
   private readonly _idleTimeoutMs: number;
-  private readonly _store?: MinimalStore;
+  private readonly _maxDurationMs: number;
+  private _store?: MinimalStore;
   private _state: SessionState | null = null;
+  private _lastSavedAt = 0;
 
   constructor(opts: SessionManagerOptions = {}) {
     this._idleTimeoutMs = opts.idleTimeoutMs ?? DEFAULT_IDLE_MS;
+    this._maxDurationMs = opts.maxDurationMs ?? DEFAULT_MAX_DUR_MS;
     this._store         = opts.store;
     this._load();
   }
@@ -62,6 +73,15 @@ export class SessionManager {
   getSid(): string {
     this._ensureActive();
     return this._state!.sid;
+  }
+
+  /**
+   * Returns the current session ID **without** triggering a session rotation.
+   * Returns an empty string when no session has been started yet.
+   * Use in read-only contexts such as diagnostics where side-effects are unwanted.
+   */
+  peekSid(): string {
+    return this._state?.sid ?? '';
   }
 
   /**
@@ -74,7 +94,9 @@ export class SessionManager {
       this._startNew(now);
     } else {
       this._state!.lastActiveAt = now;
-      this._save();
+      if (now - this._lastSavedAt >= ACTIVITY_PERSIST_GRANULARITY_MS) {
+        this._save(now);
+      }
     }
   }
 
@@ -98,12 +120,15 @@ export class SessionManager {
 
   private _isExpired(now: number): boolean {
     if (!this._state) return true;
-    return now - this._state.lastActiveAt > this._idleTimeoutMs;
+    return (
+      now - this._state.lastActiveAt > this._idleTimeoutMs ||
+      now - this._state.startedAt    > this._maxDurationMs
+    );
   }
 
   private _startNew(now: number): void {
     this._state = { sid: uuidv7(), startedAt: now, lastActiveAt: now };
-    this._save();
+    this._save(now);
   }
 
   private _load(): void {
@@ -115,8 +140,40 @@ export class SessionManager {
     } catch { /* corrupted data — ignore, start fresh */ }
   }
 
-  private _save(): void {
+  /**
+   * Attach a persistent store and immediately write the current session state.
+   * Called when cookieless `on_reject` mode transitions to consent GRANTED.
+   */
+  migrateToStore(store: MinimalStore): void {
+    this._store = store;
+    if (this._state) {
+      store.set(SESSION_KEY, JSON.stringify(this._state));
+      this._lastSavedAt = Date.now();
+    }
+  }
+
+  private _save(now = Date.now()): void {
     if (!this._state) return;
-    this._store?.set(SESSION_KEY, JSON.stringify(this._state));
+    if (this._store?.refreshKey) {
+      // Atomic read–modify–write: only update `lastActiveAt` if the stored
+      // session still belongs to us (prevents cross-tab overwrites from
+      // clobbering a newer session started by another tab).
+      const sid = this._state.sid;
+      const state = this._state;
+      this._store.refreshKey(SESSION_KEY, (current) => {
+        if (current) {
+          try {
+            const parsed: unknown = JSON.parse(current);
+            if (isSessionState(parsed) && parsed.sid === sid) {
+              return JSON.stringify({ ...parsed, lastActiveAt: state.lastActiveAt });
+            }
+          } catch { /* corrupted — fall through to full write */ }
+        }
+        return JSON.stringify(state);
+      });
+    } else {
+      this._store?.set(SESSION_KEY, JSON.stringify(this._state));
+    }
+    this._lastSavedAt = now;
   }
 }

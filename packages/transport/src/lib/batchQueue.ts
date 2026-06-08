@@ -1,4 +1,5 @@
 import { safeSetTimeout } from './safeSetTimeout';
+import type { DropReason } from './types';
 
 export interface BatchQueueOptions<T> {
   /** Flush when buffer reaches this many items. Default: 20 */
@@ -20,6 +21,8 @@ export interface BatchQueueOptions<T> {
    * Required when `batchBytes` is set. Falls back to rough JSON.stringify length.
    */
   sizeOf?: (item: T) => number;
+  /** Called when an item is evicted from the buffer because maxBufferSize was exceeded. */
+  onDropped?: (reason: DropReason, item: T) => void;
 }
 
 type SendFn<T> = (batch: T[]) => Promise<void>;
@@ -29,13 +32,14 @@ function defaultSizeOf<T>(item: T): number {
 }
 
 export class BatchQueue<T> {
-  private readonly _sendFn:        SendFn<T>;
-  private readonly _batchSize:     number;
-  private readonly _batchBytes:    number;
-  private readonly _flushIntervalMs: number;
-  private readonly _maxBufferSize: number;
+  private readonly _sendFn:          SendFn<T>;
+  private          _batchSize:       number;
+  private readonly _batchBytes:      number;
+  private          _flushIntervalMs: number;
+  private readonly _maxBufferSize:   number;
   private readonly _onPriorityItem?: (item: T) => boolean;
-  private readonly _sizeOf:        (item: T) => number;
+  private readonly _sizeOf:          (item: T) => number;
+  private readonly _onDropped?:      (reason: DropReason, item: T) => void;
 
   private _buffer:       T[] = [];
   private _bufferBytes   = 0;
@@ -51,6 +55,7 @@ export class BatchQueue<T> {
     this._maxBufferSize   = opts.maxBufferSize    ?? 500;
     this._onPriorityItem  = opts.onPriorityItem;
     this._sizeOf          = opts.sizeOf           ?? defaultSizeOf;
+    this._onDropped       = opts.onDropped;
   }
 
   add(item: T): void {
@@ -64,6 +69,7 @@ export class BatchQueue<T> {
     if (this._buffer.length >= this._maxBufferSize) {
       const dropped = this._buffer.shift()!;
       this._bufferBytes -= this._sizeOf(dropped);
+      this._onDropped?.('buffer_full', dropped);
     }
 
     this._buffer.push(item);
@@ -181,7 +187,19 @@ export class BatchQueue<T> {
       this._armTimer();
     }
   }
-
+  /**
+   * Dynamically update batch size and flush interval.
+   * Takes effect on the next flush cycle; the current timer is rearmed immediately.
+   */
+  updateConfig(batchSize: number, flushIntervalMs: number): void {
+    this._batchSize       = batchSize;
+    this._flushIntervalMs = flushIntervalMs;
+    // Rearm timer so the new interval takes effect without waiting for the old one.
+    if (!this._paused && this._buffer.length > 0) {
+      this._clearTimer();
+      this._armTimer();
+    }
+  }
   /**
    * Synchronously drain and return all buffered items, clearing the buffer.
    * Intended for use during page unload (sendBeacon path).

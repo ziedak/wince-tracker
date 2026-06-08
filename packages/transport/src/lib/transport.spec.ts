@@ -36,8 +36,8 @@ describe('Transport — send / flush', () => {
     t.send({ event: 'click' });
     await t.flush();
     expect(fetchFn).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchFn.mock.calls[0][1].body as string) as unknown[];
-    expect(body).toHaveLength(2);
+    const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as { events: unknown[] };
+    expect(envelope.events).toHaveLength(2);
     await t.close();
   });
 });
@@ -129,6 +129,130 @@ describe('Transport — drain()', () => {
     expect(() => t.drain()).not.toThrow();
 
     (global as Record<string, unknown>).navigator = orig;
+    await t.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch splitting
+// ---------------------------------------------------------------------------
+
+describe('Transport — batch splitting', () => {
+  it('splits events across multiple requests when batchSize is exceeded', async () => {
+    // Start paused to prevent auto-flush from triggering mid-add, which would
+    // cause the flush() call to join a cycle that only saw a partial buffer.
+    const { t, fetchFn } = makeTransport({ batchSize: 2, paused: true });
+    t.send({ event: 'a' });
+    t.send({ event: 'b' });
+    t.send({ event: 'c' });
+    // All 3 events are in the buffer before flush() starts its cycle.
+    t.start();
+    await t.flush();
+    // 3 events, batchSize=2 → 2 HTTP calls ([a,b] and [c])
+    expect(fetchFn.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const allEvents = fetchFn.mock.calls.flatMap(
+      (call) => (JSON.parse(call[1].body as string) as { events: { event: string }[] }).events,
+    );
+    expect(allEvents.map((e) => e.event).sort()).toEqual(['a', 'b', 'c']);
+    await t.close();
+  });
+
+  it('sends all events in a single request when count <= batchSize', async () => {
+    const { t, fetchFn } = makeTransport({ batchSize: 10 });
+    t.send({ event: 'x' });
+    t.send({ event: 'y' });
+    await t.flush();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    await t.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Compression
+// ---------------------------------------------------------------------------
+
+describe('Transport — compression', () => {
+  it('sends a Uint8Array body when compress:true', async () => {
+    const { t, fetchFn } = makeTransport({ compress: true });
+    t.send({ event: 'ev' });
+    await t.flush();
+    const body = fetchFn.mock.calls[0][1].body;
+    expect(body).toBeInstanceOf(Uint8Array);
+    await t.close();
+  });
+
+  it('sets Content-Encoding: gzip header when compress:true', async () => {
+    const { t, fetchFn } = makeTransport({ compress: true });
+    t.send({ event: 'ev' });
+    await t.flush();
+    const headers = fetchFn.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers['Content-Encoding']).toBe('gzip');
+    await t.close();
+  });
+
+  it('sends a plain JSON string body when compress:false', async () => {
+    const { t, fetchFn } = makeTransport({ compress: false });
+    t.send({ event: 'ev' });
+    await t.flush();
+    const body = fetchFn.mock.calls[0][1].body;
+    expect(typeof body).toBe('string');
+    expect(() => JSON.parse(body as string)).not.toThrow();
+    await t.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Retry behaviour
+// ---------------------------------------------------------------------------
+
+describe('Transport — retry on HTTP errors', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it('retries on 503 and eventually succeeds', async () => {
+    let calls = 0;
+    const fetchFn = jest.fn().mockImplementation(() => {
+      calls++;
+      if (calls < 3) {
+        return Promise.resolve({
+          ok: false, status: 503,
+          headers: { get: () => null },
+          body: null,
+        });
+      }
+      return Promise.resolve({
+        ok: true, status: 200,
+        headers: { get: () => null },
+        body: null,
+      });
+    });
+
+    const { t } = makeTransport({
+      fetch: fetchFn as unknown as (u: string, i: RequestInit) => Promise<Response>,
+      retry: { attempts: 5, baseDelayMs: 10, maxDelayMs: 100 },
+    });
+
+    t.send({ event: 'ev' });
+    const flushP = t.flush();
+    // Run all timers to process retries
+    await jest.runAllTimersAsync();
+    await flushP;
+
+    expect(fetchFn.mock.calls.length).toBeGreaterThanOrEqual(3);
+    await t.close();
+  });
+
+  it('does not retry on a 400 (permanent client error)', async () => {
+    const fetchFn = makeFetch(400);
+    const { t } = makeTransport({
+      fetch: fetchFn as unknown as (u: string, i: RequestInit) => Promise<Response>,
+      retry: { attempts: 3, baseDelayMs: 10 },
+    });
+
+    t.send({ event: 'ev' });
+    await t.flush();
+    // Should only attempt once — 400 is a permanent error
+    expect(fetchFn).toHaveBeenCalledTimes(1);
     await t.close();
   });
 });

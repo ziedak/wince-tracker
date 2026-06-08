@@ -3,32 +3,166 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Wince UMD Sandbox</title>
+    <title>Wince SDK Sandbox</title>
     <style>
-      body { font-family: Inter, system-ui, Arial, sans-serif; padding: 24px; line-height: 1.4 }
-      pre { background: #f6f8fa; padding: 12px; border-radius: 6px }
+      *, *::before, *::after { box-sizing: border-box; }
+      body   { font-family: Inter, system-ui, Arial, sans-serif; padding: 24px; line-height: 1.5; max-width: 780px; margin: 0 auto; }
+      h1     { margin-top: 0; }
+      .row   { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+      button { padding: 8px 16px; border: 1px solid #d0d7de; border-radius: 6px; cursor: pointer; background: #f6f8fa; font-size: 14px; }
+      button:hover { background: #eaf0f6; }
+      button.danger { border-color: #cf222e; color: #cf222e; }
+      button.primary { background: #0969da; color: #fff; border-color: #0969da; }
+      button.primary:hover { background: #0750a2; }
+      #log   { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 12px; font-family: monospace; font-size: 12px; max-height: 420px; overflow-y: auto; }
+      .entry { border-bottom: 1px solid #eaeef2; padding: 4px 0; white-space: pre-wrap; word-break: break-all; }
+      .entry:last-child { border-bottom: none; }
+      .ts    { color: #6e7781; margin-right: 8px; }
+      .ok    { color: #1a7f37; }
+      .err   { color: #cf222e; }
+      .info  { color: #0969da; }
+      label  { font-size: 14px; }
+      input  { padding: 6px 10px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; width: 220px; }
     </style>
   </head>
   <body>
-    <h1>Wince UMD Sandbox</h1>
-    <p>This page loads the single UMD bundle from <strong>@wince/web</strong> and shows the exported API.</p>
+    <h1>Wince SDK Sandbox</h1>
+    <p>
+      Uses <strong>WinceLite</strong> (no auto-plugins) from <code>vendor/index.lite.umd.js</code>.
+      All requests go to <strong>httpbin.org/post</strong> — check the Network tab to inspect payloads.
+    </p>
 
-    <div id="result"><em>loading...</em></div>
+    <div class="row">
+      <button class="primary" id="btn-page">page()</button>
+      <button id="btn-track-cart">track add_to_cart</button>
+      <button id="btn-track-checkout">track checkout_start</button>
+    </div>
+    <div class="row">
+      <label>User ID: <input id="uid" placeholder="user_abc" value="user_abc" /></label>
+      <button id="btn-identify">identify()</button>
+      <button id="btn-reset" class="danger">reset()</button>
+    </div>
+    <div class="row">
+      <button id="btn-optin">optIn()</button>
+      <button id="btn-optout" class="danger">optOut()</button>
+      <button id="btn-flush">flush()</button>
+    </div>
 
-    <!-- Load the bundled UMD copied into sandbox/vendor by the build/watch -->
-    <script src="./vendor/index.umd.js"></script>
+    <h3>Event log</h3>
+    <div id="log"><div class="entry info"><span class="ts">--</span>Waiting for SDK…</div></div>
+
+    <!-- Lite bundle (no auto-plugins) copied into vendor/ by the rollup build -->
+    <script src="./vendor/index.lite.umd.js"></script>
 
     <script>
-      const out = document.getElementById('result');
-      try {
-        const W = window.Wince ?? {};
-        const coreVal = typeof W.core === 'function' ? W.core() : 'n/a';
-        out.innerHTML = `<pre>core(): ${coreVal}</pre>`;
-        console.log('Wince global:', W);
-      } catch (err) {
-        out.textContent = 'Error: ' + err.message;
-        console.error(err);
-      }
+      (function () {
+        const log = document.getElementById('log');
+
+        function append(text, cls) {
+          const ts   = new Date().toISOString().slice(11, 23);
+          const div  = document.createElement('div');
+          div.className = 'entry ' + (cls || '');
+          div.innerHTML = '<span class="ts">' + ts + '</span>' + escHtml(text);
+          log.appendChild(div);
+          log.scrollTop = log.scrollHeight;
+        }
+
+        function escHtml(s) {
+          return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        }
+
+        // ----------------------------------------------------------------
+        // Intercept fetch so we can log every outgoing batch
+        // ----------------------------------------------------------------
+        const _origFetch = window.fetch.bind(window);
+        const interceptFetch = function (url, init) {
+          let bodyPreview = '';
+          try {
+            if (typeof init.body === 'string') {
+              bodyPreview = init.body.slice(0, 400);
+            } else if (init.body instanceof Uint8Array) {
+              bodyPreview = '[gzip ' + init.body.byteLength + ' bytes]';
+            }
+          } catch (_) {}
+          append('→ POST ' + url + '\n' + bodyPreview, 'ok');
+          return _origFetch(url, init).then(function (res) {
+            append('← ' + res.status + ' ' + res.url, res.ok ? 'ok' : 'err');
+            return res;
+          }).catch(function (err) {
+            append('← ERROR: ' + err.message, 'err');
+            throw err;
+          });
+        };
+
+        // ----------------------------------------------------------------
+        // Init SDK (starts paused — consent not yet granted)
+        // ----------------------------------------------------------------
+        const W = window.WinceLite;
+        if (!W) {
+          append('WinceLite not found — run `pnpm nx run @wince/web:build` first', 'err');
+          return;
+        }
+
+        const tracker = W.init({
+          endpoint:       'https://httpbin.org/post',
+          compress:       false,   // readable JSON in Network tab
+          batchSize:      5,
+          batchTimeoutMs: 1500,
+          consent:        null,    // disable consent gating for the sandbox
+          fetch:          interceptFetch,
+        });
+
+        append('SDK initialised — consent gating disabled for sandbox', 'info');
+
+        // ----------------------------------------------------------------
+        // Button handlers
+        // ----------------------------------------------------------------
+        document.getElementById('btn-page').onclick = function () {
+          tracker.page();
+          append('page() called', 'info');
+        };
+
+        document.getElementById('btn-track-cart').onclick = function () {
+          tracker.track('add_to_cart', { product_id: 'SKU-001', price: 49.99, quantity: 1, currency: 'USD' });
+          append('track(add_to_cart) queued', 'info');
+        };
+
+        document.getElementById('btn-track-checkout').onclick = function () {
+          tracker.track('checkout_start', { cart_total: 149.97, currency: 'USD' });
+          append('track(checkout_start) queued', 'info');
+        };
+
+        document.getElementById('btn-identify').onclick = function () {
+          const uid = document.getElementById('uid').value.trim();
+          if (!uid) { append('Enter a user ID first', 'err'); return; }
+          tracker.identify(uid);
+          append('identify("' + uid + '")', 'info');
+        };
+
+        document.getElementById('btn-reset').onclick = function () {
+          tracker.reset();
+          append('reset() — new session + anonymous ID', 'info');
+        };
+
+        document.getElementById('btn-optin').onclick = function () {
+          tracker.optIn();
+          append('optIn()', 'info');
+        };
+
+        document.getElementById('btn-optout').onclick = function () {
+          tracker.optOut();
+          append('optOut() — transport paused', 'info');
+        };
+
+        document.getElementById('btn-flush').onclick = async function () {
+          append('flush() …', 'info');
+          await tracker.flush();
+          append('flush() complete', 'ok');
+        };
+      })();
     </script>
   </body>
 </html>
