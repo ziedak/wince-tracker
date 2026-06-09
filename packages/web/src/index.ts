@@ -1,19 +1,19 @@
- // Browser SDK entry point — full bundle (all plugins included).
+// Browser SDK entry point — full bundle (all plugins included).
 
 export * from '@wince/core';
 export { WinceClient, init } from './client';
 export type { WinceConfig, WinceDiagnostics } from './client';
 export type { DropReason } from '@wince/transport';
-export { createDefaultTransport } from './transport';
+export { createDefaultTransport } from '@wince/transport';
 
 // Tree-shakeable auto-capture plugins (not included in index.lite.ts)
-export { mountPageView }    from './plugins/pageView';
+export { mountPageView } from './plugins/pageView';
 export type { PageViewOptions } from './plugins/pageView';
-export { mountClick }       from './plugins/click';
-export type { ClickData }   from './plugins/click';
-export { mountRageClick }   from './plugins/rageClick';
+export { mountClick } from './plugins/click';
+export type { ClickData } from './plugins/click';
+export { mountRageClick } from './plugins/rageClick';
 export type { RageClickOptions } from './plugins/rageClick';
-export { mountCart }        from './plugins/cart';
+export { mountCart } from './plugins/cart';
 export type { CartEventDetail } from './plugins/cart';
 export { mountFormAbandon } from './plugins/formAbandon';
 export type { FormAbandonOptions } from './plugins/formAbandon';

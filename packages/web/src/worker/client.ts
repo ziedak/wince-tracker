@@ -12,88 +12,77 @@
  * - Worker unavailable → `WinceClient`  (everything on main thread)
  */
 
-import { Transport }            from '@wince/transport';
-import type { DropReason }     from '@wince/transport';
-import { ConsentManager, consent as globalConsent, ConsentStatus, type ConsentProvider } from '@wince/consent';
+import { createClientTransport } from '@wince/transport';
+import { wireConsent } from '../lib/consentWire';
 import { uuidv7 } from '@wince/core';
 import type { PersonProps } from '@wince/core';
 import type { WinceConfig, WinceDiagnostics } from '../client';
 import { WinceClient } from '../client';
-import type { TrackEvent } from '@wince/core';
-import { getOrCreateWindowId } from '../_windowId';
-import { LRUCache } from '@wince/cache';
-import type { MainToWorkerMsg, WorkerToMainMsg, WorkerConfig } from './messages';
+import { fetchEnrichment } from '../lib/enrichment';
+import { applyEnrichmentOnceToEvents } from '../lib/preEnrich';
+import type {
+  MainToWorkerMsg,
+  WorkerToMainMsg,
+  WorkerConfig,
+} from './messages';
+import { buildBaseDiagnostics } from '../lib/diagnostics';
+import { BaseClient } from '../lib/baseClient';
+import { type TrackEvent } from '@wince/core';
 
 // ---------------------------------------------------------------------------
 // WorkerClient
 // ---------------------------------------------------------------------------
 
-export class WorkerClient {
-  private readonly _worker:           Worker;
-  private readonly _transport:        Transport;
-  private readonly _consent:          ConsentProvider | null;
-  private readonly _windowId:         string;
-  private readonly _onEventDropped?:  (reason: DropReason, event?: Partial<TrackEvent>) => void;
-  private readonly _diag = { sent: 0, droppedByReason: {} as Partial<Record<DropReason, number>> };
-  private readonly _fetch?:           (url: string, init: RequestInit) => Promise<Response>;
-  private _enrichmentReady:           boolean;
-  private _enrichmentProps?:          Record<string, unknown>;
-  private _enrichmentPersonProps?:    PersonProps;
-  private _pageviewId:                string | undefined;
-  private _prevPageviewId:            string | undefined;
-  private _unsubConsent?:             () => void;
-  private _removeListeners?:          () => void;
+export class WorkerClient extends BaseClient {
+  private readonly _worker: Worker;
 
   // flush() round-trip tracking
   private _flushSeq = 0;
   private readonly _flushResolvers = new Map<number, () => void>();
 
   // Enrichment deferred until Worker sends identity_snapshot
-  private _pendingEnrichmentUrl?:      string;
+  private _pendingEnrichmentUrl?: string;
   private _pendingEnrichmentTimeoutMs?: number;
-  private _workerAnon?:                string;
-  private _workerSession?:             string;
+  private _workerAnon?: string;
+  private _workerSession?: string;
   // Enriched events buffered while the enrichment GET is in-flight.
-  private _preEnrichEventBuffer: Array<Record<string, unknown>> = [];
-  // Client-side dedup: identical event+props within 2 s are dropped.
-  private readonly _recentEvents = new LRUCache<string, true>({ maxSize: 50, ttlMs: 2_000 });
+  private _preEnrichEventBuffer: TrackEvent[] = [];
 
   // idb_size_request round-trip tracking
   private _idbSizeSeq = 0;
-  private readonly _idbSizeResolvers = new Map<number, (size: number) => void>();
+  private readonly _idbSizeResolvers = new Map<
+    number,
+    (size: number) => void
+  >();
 
   constructor(config: WinceConfig, worker: Worker) {
+    super({
+      consent: config.consent,
+      fetch: config.fetch,
+      onEventDropped: config.onEventDropped,
+      enrichmentReady: !config.enrichmentUrl,
+    });
+
     this._worker = worker;
     this._worker.onmessage = (e: MessageEvent<WorkerToMainMsg>) =>
       this._onMessage(e.data);
     this._worker.onerror = (e) =>
       console.error('[WorkerClient] Worker error', e);
 
-    // Resolve consent (same logic as WinceClient)
-    this._consent =
-      config.consent === undefined ? globalConsent : config.consent;
-
-    this._windowId       = getOrCreateWindowId();
-    this._onEventDropped = config.onEventDropped;
-    this._fetch          = config.fetch;
-
-    // Transport always starts paused; _maybeStart() unpauses when both
-    // consent is OK and enrichment (if configured) has resolved.
-    this._enrichmentReady = !config.enrichmentUrl;
-
     // Transport — HTTP layer stays on the main thread
-    this._transport = new Transport({
-      url:            config.endpoint,
-      compress:       config.compress       ?? true,
-      batchSize:      config.batchSize      ?? 20,
-      batchTimeoutMs: config.batchTimeoutMs ?? 2_000,
-      maxBufferSize:  config.maxBufferSize  ?? 500,
-      headers:        config.headers,
-      retry:          config.retry,
-      fetch:          config.fetch,
+    this._transport = createClientTransport({
+      url: config.endpoint,
+      compress: config.compress,
+      batchSize: config.batchSize,
+      batchTimeoutMs: config.batchTimeoutMs,
+      maxBufferSize: config.maxBufferSize,
+      headers: config.headers,
+      retry: config.retry,
+      fetch: config.fetch,
       paused: true,
       onDropped: (reason, item) => {
-        this._diag.droppedByReason[reason] = (this._diag.droppedByReason[reason] ?? 0) + 1;
+        this._diag.droppedByReason[reason] =
+          (this._diag.droppedByReason[reason] ?? 0) + 1;
         this._onEventDropped?.(reason, item);
       },
       onBatchDelivered: (eids) => {
@@ -104,26 +93,23 @@ export class WorkerClient {
 
     // Consent changes mirror to Transport
     if (this._consent !== null) {
-      this._unsubConsent = this._consent.onChange((status) => {
-        if (status === ConsentStatus.GRANTED) {
-          // In on_reject mode: notify Worker so it can migrate its store.
-          if (config.cookieless === 'on_reject') {
-            this._post({ type: 'consent_change', granted: true });
-          }
-          this._maybeStart();
-        } else {
-          this._transport.pause();
-        }
+      this._unsubConsent = wireConsent(this._consent, config.cookieless, {
+        onGrant: () => this._maybeStart(),
+        onRevoke: () => this._transport.pause(),
+        onMigrate: () => {
+          this._post({ type: 'consent_change', granted: true });
+        },
       });
     }
 
     // Send serialisable config fields to Worker
     const workerConfig: WorkerConfig = {
-      sessionIdleTimeoutMs:  config.sessionIdleTimeoutMs,
-      sessionMaxDurationMs:  config.sessionMaxDurationMs,
-      sampleRate:            config.sampleRate,
-      cookieless:            config.cookieless,
-      initialConsentGranted: this._consent === null || this._consent.isGranted(),
+      sessionIdleTimeoutMs: config.sessionIdleTimeoutMs,
+      sessionMaxDurationMs: config.sessionMaxDurationMs,
+      sampleRate: config.sampleRate,
+      cookieless: config.cookieless,
+      initialConsentGranted:
+        this._consent === null || this._consent.isGranted(),
     };
     this._post({ type: 'init', config: workerConfig });
 
@@ -136,7 +122,7 @@ export class WorkerClient {
     // Enrichment needs anon/session IDs which live in the Worker; defer until
     // the Worker posts back an identity_snapshot (sent after handleInit).
     if (config.enrichmentUrl) {
-      this._pendingEnrichmentUrl      = config.enrichmentUrl;
+      this._pendingEnrichmentUrl = config.enrichmentUrl;
       this._pendingEnrichmentTimeoutMs = config.enrichmentTimeoutMs ?? 1_500;
       // _enrichmentReady is already false; transport stays paused until enrichment resolves.
     } else {
@@ -148,7 +134,11 @@ export class WorkerClient {
   // Public API  (mirrors WinceClient)
   // -------------------------------------------------------------------------
 
-  track(name: string, props?: Record<string, unknown>, personProps?: PersonProps): void {
+  track(
+    name: string,
+    props?: Record<string, unknown>,
+    personProps?: PersonProps,
+  ): void {
     if (this._consent !== null && !this._consent.isGranted()) {
       this._drop('consent');
       return;
@@ -163,28 +153,36 @@ export class WorkerClient {
     this._recentEvents.set(dedupKey, true);
 
     // One-shot enrichment props applied to the first event after init.
-    const mergedProps: Record<string, unknown> | undefined = this._enrichmentProps
+    const mergedProps: Record<string, unknown> | undefined = this
+      ._enrichmentProps
       ? { ...this._enrichmentProps, ...props }
       : props;
     this._enrichmentProps = undefined;
 
-    const mergedPersonProps: PersonProps | undefined = this._enrichmentPersonProps
+    const mergedPersonProps: PersonProps | undefined = this
+      ._enrichmentPersonProps
       ? {
-          $set:      { ...this._enrichmentPersonProps.$set,      ...personProps?.$set },
-          $set_once: { ...this._enrichmentPersonProps.$set_once, ...personProps?.$set_once },
+          $set: { ...this._enrichmentPersonProps.$set, ...personProps?.$set },
+          $set_once: {
+            ...this._enrichmentPersonProps.$set_once,
+            ...personProps?.$set_once,
+          },
         }
       : personProps;
     this._enrichmentPersonProps = undefined;
 
     this._post({
-      type:  'track',
+      type: 'track',
       name,
       props: mergedProps,
-      url:       typeof document !== 'undefined' ? document.URL                    : undefined,
-      ref:       typeof document !== 'undefined' ? (document.referrer || undefined) : undefined,
-      window_id:   this._windowId,
+      url: typeof document !== 'undefined' ? document.URL : undefined,
+      ref:
+        typeof document !== 'undefined'
+          ? document.referrer || undefined
+          : undefined,
+      window_id: this._windowId,
       pageview_id: this._pageviewId,
-      $set:      mergedPersonProps?.$set,
+      $set: mergedPersonProps?.$set,
       $set_once: mergedPersonProps?.$set_once,
     });
   }
@@ -204,7 +202,8 @@ export class WorkerClient {
     this._recentEvents.set(dedupKey, true);
 
     // One-shot enrichment props applied to the first event after init.
-    const mergedProps: Record<string, unknown> | undefined = this._enrichmentProps
+    const mergedProps: Record<string, unknown> | undefined = this
+      ._enrichmentProps
       ? { ...this._enrichmentProps, ...props }
       : props;
     this._enrichmentProps = undefined;
@@ -213,53 +212,48 @@ export class WorkerClient {
     this._enrichmentPersonProps = undefined;
 
     this._prevPageviewId = this._pageviewId;
-    this._pageviewId     = uuidv7();
+    this._pageviewId = uuidv7();
 
     this._post({
-      type:  'track',
-      name:  '$page_view',
+      type: 'track',
+      name: '$page_view',
       props: {
-        title: typeof document !== 'undefined' ? document.title                : undefined,
-        ref:   typeof document !== 'undefined' ? (document.referrer || undefined) : undefined,
+        title: typeof document !== 'undefined' ? document.title : undefined,
+        ref:
+          typeof document !== 'undefined'
+            ? document.referrer || undefined
+            : undefined,
         ...mergedProps,
       },
-      url:              typeof document !== 'undefined' ? document.URL                    : undefined,
-      ref:              typeof document !== 'undefined' ? (document.referrer || undefined) : undefined,
-      window_id:        this._windowId,
-      pageview_id:      this._pageviewId,
+      url: typeof document !== 'undefined' ? document.URL : undefined,
+      ref:
+        typeof document !== 'undefined'
+          ? document.referrer || undefined
+          : undefined,
+      window_id: this._windowId,
+      pageview_id: this._pageviewId,
       prev_pageview_id: this._prevPageviewId,
-      $set:      mergedPersonProps?.$set,
+      $set: mergedPersonProps?.$set,
       $set_once: mergedPersonProps?.$set_once,
     });
   }
 
   identify(uid: string, traits?: PersonProps): void {
-    this._post({ type: 'identify', uid, $set: traits?.$set, $set_once: traits?.$set_once });
+    this._post({
+      type: 'identify',
+      uid,
+      $set: traits?.$set,
+      $set_once: traits?.$set_once,
+    });
   }
 
   reset(): void {
-    this._pageviewId     = undefined;
+    this._pageviewId = undefined;
     this._prevPageviewId = undefined;
     // Clear per-user dedup state so the new session is not affected by events
     // from the previous user.
     this._recentEvents.clear();
     this._post({ type: 'reset' });
-  }
-
-  optIn(): void {
-    if (this._consent instanceof ConsentManager) {
-      this._consent.optIn();
-    } else {
-      this._maybeStart();
-    }
-  }
-
-  optOut(): void {
-    if (this._consent instanceof ConsentManager) {
-      this._consent.optOut();
-    } else {
-      this._transport.pause();
-    }
   }
 
   /**
@@ -291,17 +285,16 @@ export class WorkerClient {
    * `idbQueueSize` is a Promise that resolves to the IDB pending count.
    */
   diagnostics(): WinceDiagnostics {
-    const dropped = Object.values(this._diag.droppedByReason).reduce((a, b) => a + (b ?? 0), 0);
+    const base = buildBaseDiagnostics(
+      this._diag,
+      this._transport,
+      this._requestIdbSize(),
+    );
     return {
-      eventsQueued:    this._transport.queueSize,
-      eventsSent:      this._diag.sent,
-      eventsDropped:   dropped,
-      droppedByReason: { ...this._diag.droppedByReason },
-      circuitOpen:     this._transport.circuitOpen,
-      idbQueueSize:    this._requestIdbSize(),
-      sessionId:       undefined, // session lives in Worker — not available on main thread
-      windowId:        this._windowId,
-      anonId:          undefined, // anon ID lives in Worker — not available on main thread
+      ...base,
+      sessionId: undefined, // session lives in Worker — not available on main thread
+      windowId: this._windowId,
+      anonId: undefined, // anon ID lives in Worker — not available on main thread
     };
   }
 
@@ -313,53 +306,22 @@ export class WorkerClient {
     this._worker.postMessage(msg);
   }
 
-  private _drop(reason: DropReason): void {
-    this._diag.droppedByReason[reason] = (this._diag.droppedByReason[reason] ?? 0) + 1;
-    this._onEventDropped?.(reason);
-  }
-
-  private _maybeStart(): void {
-    if (!this._enrichmentReady) return;
-    if (this._consent !== null && !this._consent.isGranted()) return;
-    this._transport.start();
-  }
-
   private async _runEnrichment(url: string, timeoutMs: number): Promise<void> {
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-      const fetchUrl = new URL(url, typeof location !== 'undefined' ? location.href : undefined);
-      // Use the anon/session IDs received from the Worker's identity_snapshot.
-      fetchUrl.searchParams.set('anon',    this._workerAnon    ?? '');
-      fetchUrl.searchParams.set('session', this._workerSession ?? '');
-
-      const fetchFn = this._fetch ?? fetch;
-      const resp = await fetchFn(fetchUrl.toString(), { signal: controller.signal, method: 'GET' });
-      clearTimeout(timer);
-
-      if (resp.ok) {
-        const raw: unknown = await resp.json();
-        if (raw && typeof raw === 'object') {
-          const data = raw as Record<string, unknown>;
-          const $set     = data.$set     instanceof Object && !Array.isArray(data.$set)
-            ? data.$set     as Record<string, unknown> : undefined;
-          const $set_once = data.$set_once instanceof Object && !Array.isArray(data.$set_once)
-            ? data.$set_once as Record<string, unknown> : undefined;
-          const uid = typeof data.uid === 'string' ? data.uid : undefined;
-
-          if (uid) {
-            this.identify(uid, { $set, $set_once });
-          } else if ($set || $set_once) {
-            this._enrichmentPersonProps = { $set, $set_once };
-          }
-
-          const { uid: _u, $set: _s, $set_once: _so, ...rest } = data;
-          if (Object.keys(rest).length > 0) this._enrichmentProps = rest;
-        }
+      const res = await fetchEnrichment(
+        url,
+        () => this._workerAnon,
+        () => this._workerSession,
+        this._fetch,
+        timeoutMs,
+      );
+      if (res) {
+        if (res.uid) this.identify(res.uid, res.personProps);
+        else if (res.personProps) this._enrichmentPersonProps = res.personProps;
+        if (res.props) this._enrichmentProps = res.props;
       }
     } catch {
-      // Timeout, network error, or JSON parse error — proceed without enrichment.
+      // proceed without enrichment on error
     } finally {
       this._enrichmentReady = true;
       // Flush buffered pre-enrichment events. Apply props to the first non-$identify
@@ -367,26 +329,16 @@ export class WorkerClient {
       if (this._preEnrichEventBuffer.length > 0) {
         const buffer = this._preEnrichEventBuffer;
         this._preEnrichEventBuffer = [];
-        let applied = false;
-        for (const item of buffer) {
-          const ev = item as unknown as TrackEvent;
-          if (!applied && ev.t !== '$identify' && (this._enrichmentProps || this._enrichmentPersonProps)) {
-            this._transport.send({
-              ...ev,
-              props: this._enrichmentProps
-                ? { ...this._enrichmentProps, ...(ev.props ?? {}) } : ev.props,
-              $set: this._enrichmentPersonProps
-                ? { ...this._enrichmentPersonProps.$set, ...(ev.$set ?? {}) } : ev.$set,
-              $set_once: this._enrichmentPersonProps
-                ? { ...this._enrichmentPersonProps.$set_once, ...(ev.$set_once ?? {}) } : ev.$set_once,
-            } as unknown as Record<string, unknown>);
-            this._enrichmentProps       = undefined;
-            this._enrichmentPersonProps = undefined;
-            applied = true;
-          } else {
-            this._transport.send(item);
-          }
-        }
+        const { events } = applyEnrichmentOnceToEvents(
+          buffer,
+          this._enrichmentProps,
+          this._enrichmentPersonProps,
+        );
+        // Clear one-shot enrichment props after applying
+        this._enrichmentProps = undefined;
+        this._enrichmentPersonProps = undefined;
+        for (const item of events)
+          this._transport.send(item as unknown as Record<string, unknown>);
       }
       this._maybeStart();
     }
@@ -423,9 +375,9 @@ export class WorkerClient {
         // Buffer events that arrive before the enrichment GET resolves so props
         // can be applied to the first real event (not auto-generated $identify).
         if (!this._enrichmentReady) {
-          this._preEnrichEventBuffer.push(msg.event as unknown as Record<string, unknown>);
+          this._preEnrichEventBuffer.push(msg.event);
         } else {
-          this._transport.send(msg.event as unknown as Record<string, unknown>);
+          this._transport.send(msg.event);
         }
         break;
 
@@ -447,11 +399,11 @@ export class WorkerClient {
         break;
 
       case 'identity_snapshot':
-        this._workerAnon    = msg.anon;
+        this._workerAnon = msg.anon;
         this._workerSession = msg.session;
         // Fire any deferred enrichment request now that we have the real IDs.
         if (this._pendingEnrichmentUrl) {
-          const url     = this._pendingEnrichmentUrl;
+          const url = this._pendingEnrichmentUrl;
           const timeout = this._pendingEnrichmentTimeoutMs ?? 1_500;
           this._pendingEnrichmentUrl = undefined;
           void this._runEnrichment(url, timeout);
@@ -468,21 +420,21 @@ export class WorkerClient {
     if (typeof window === 'undefined') return;
 
     const onPageHide = () => this._transport.drain();
-    const onOffline  = () => this._transport.pause();
-    const onOnline   = () => {
+    const onOffline = () => this._transport.pause();
+    const onOnline = () => {
       if (this._consent === null || this._consent.isGranted()) {
         this._transport.start();
       }
     };
 
     window.addEventListener('pagehide', onPageHide);
-    window.addEventListener('offline',  onOffline);
-    window.addEventListener('online',   onOnline);
+    window.addEventListener('offline', onOffline);
+    window.addEventListener('online', onOnline);
 
     this._removeListeners = () => {
       window.removeEventListener('pagehide', onPageHide);
-      window.removeEventListener('offline',  onOffline);
-      window.removeEventListener('online',   onOnline);
+      window.removeEventListener('offline', onOffline);
+      window.removeEventListener('online', onOnline);
     };
   }
 }
@@ -516,10 +468,13 @@ export function initWithWorker(
   if (typeof Worker !== 'undefined') {
     try {
       const url = workerUrl
-        // Explicit URL provided (UMD / CJS callers)
-        ? new URL(workerUrl, typeof location !== 'undefined' ? location.href : undefined)
-        // ESM default: resolve relative to this module
-        : new URL('./tracker.worker.js', import.meta.url);
+        ? // Explicit URL provided (UMD / CJS callers)
+          new URL(
+            workerUrl,
+            typeof location !== 'undefined' ? location.href : undefined,
+          )
+        : // ESM default: resolve relative to this module
+          new URL('./tracker.worker.js', import.meta.url);
 
       const worker = new Worker(url);
       return new WorkerClient(config, worker);

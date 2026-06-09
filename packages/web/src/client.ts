@@ -1,5 +1,5 @@
-import { Transport } from '@wince/transport';
 import type { DropReason } from '@wince/transport';
+import { createClientTransport } from '@wince/transport';
 import {
   Pipeline,
   SessionManager,
@@ -12,14 +12,12 @@ import {
   type MinimalStore,
 } from '@wince/core';
 import { createStore, type IStore, type StoreKind } from '@wince/storage';
-import {
-  consent as globalConsent,
-  ConsentStatus,
-  ConsentManager,
-  type ConsentProvider,
-} from '@wince/consent';
-import { getOrCreateWindowId } from './_windowId';
-import { LRUCache } from '@wince/cache';
+import type { ConsentProvider } from '@wince/consent';
+import { wireConsent } from './lib/consentWire';
+import { buildBaseDiagnostics } from './lib/diagnostics';
+import { fetchEnrichment } from './lib/enrichment';
+import { applyEnrichmentOnceToEvents } from './lib/preEnrich';
+import { BaseClient } from './lib/baseClient';
 
 // ---------------------------------------------------------------------------
 // Adapter: IStore (unknown-typed get) → MinimalStore (string | null get)
@@ -27,13 +25,18 @@ import { LRUCache } from '@wince/cache';
 
 function toMinimalStore(store: IStore): MinimalStore {
   const base: MinimalStore = {
-    get:    (k) => { const v = store.get(k); return typeof v === 'string' ? v : null; },
-    set:    (k, v) => store.set(k, v),
+    get: (k) => {
+      const v = store.get(k);
+      return typeof v === 'string' ? v : null;
+    },
+    set: (k, v) => store.set(k, v),
     delete: (k) => store.delete(k),
   };
   // Wire refreshKey if the underlying store supports it (LocalStore).
   if (typeof (store as { refreshKey?: unknown }).refreshKey === 'function') {
-    type WithRefresh = { refreshKey(k: string, u: (c: string | null) => string): void };
+    type WithRefresh = {
+      refreshKey(k: string, u: (c: string | null) => string): void;
+    };
     base.refreshKey = (k, updater) =>
       (store as unknown as WithRefresh).refreshKey(k, updater);
   }
@@ -46,23 +49,23 @@ function toMinimalStore(store: IStore): MinimalStore {
 
 export interface WinceDiagnostics {
   /** Events currently waiting in the in-memory Transport buffer. */
-  eventsQueued:    number;
+  eventsQueued: number;
   /** Events successfully delivered to the ingest endpoint this session. */
-  eventsSent:      number;
+  eventsSent: number;
   /** Total events dropped (sum of all droppedByReason values). */
-  eventsDropped:   number;
+  eventsDropped: number;
   /** Per-reason drop counters (only reasons that have occurred are present). */
   droppedByReason: Partial<Record<DropReason, number>>;
   /** Whether the circuit breaker is currently open (blocking HTTP sends). */
-  circuitOpen:     boolean;
+  circuitOpen: boolean;
   /** Promise resolving to the number of events pending in IndexedDB (Worker path only; 0 otherwise). */
-  idbQueueSize:    Promise<number>;
+  idbQueueSize: Promise<number>;
   /** Current session ID. Undefined in Worker path (session lives off main thread). */
-  sessionId?:      string;
+  sessionId?: string;
   /** Tab-scoped window ID. */
-  windowId:        string;
+  windowId: string;
   /** Anonymous device/browser ID. Undefined in Worker path. */
-  anonId?:         string;
+  anonId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,62 +160,53 @@ export interface WinceConfig {
 // WinceClient
 // ---------------------------------------------------------------------------
 
-export class WinceClient {
-  private readonly _transport:          Transport;
-  private readonly _pipeline:           Pipeline<TrackEvent>;
-  private readonly _session:            SessionManager;
-  private readonly _identity:           IdentityManager;
-  private readonly _seq:                SequenceCounter;
-  private readonly _sampler?:           SamplingFilter;
-  private readonly _consent:            ConsentProvider | null;
-  private readonly _windowId:           string;
-  private readonly _store:              IStore;
-  private readonly _minStore:           MinimalStore;
-  private readonly _fetch?:             (url: string, init: RequestInit) => Promise<Response>;
-  private readonly _onEventDropped?:    (reason: DropReason, event?: Partial<TrackEvent>) => void;
-  private readonly _diag = { sent: 0, droppedByReason: {} as Partial<Record<DropReason, number>> };
-  private _enrichmentReady:             boolean;
-  private _enrichmentProps?:            Record<string, unknown>;
-  private _enrichmentPersonProps?:      PersonProps;
-  private _preEnrichQueue:              TrackEvent[] = [];
-  // Client-side dedup: identical event+props within 2 s are dropped.
-  private readonly _recentEvents = new LRUCache<string, true>({ maxSize: 50, ttlMs: 2_000 });
-  // Near-error: subsequent events within 30 s of a crash carry $near_error context.
-  private _lastErrorEid?:               string;
-  private _lastErrorTimer?:             ReturnType<typeof setTimeout>;
-  private _pageviewId:                  string | undefined;
-  private _prevPageviewId:              string | undefined;
-  private _unsubConsent?:               () => void;
-  private _removeListeners?:            () => void;
+export class WinceClient extends BaseClient {
+  private readonly _pipeline: Pipeline<TrackEvent>;
+  private readonly _session: SessionManager;
+  private readonly _identity: IdentityManager;
+  private readonly _seq: SequenceCounter;
+  private readonly _sampler?: SamplingFilter;
+  private readonly _store: IStore;
+  private readonly _minStore: MinimalStore;
+  private _preEnrichQueue: TrackEvent[] = [];
+  private _lastErrorEid?: string;
+  private _lastErrorTimer?: ReturnType<typeof setTimeout>;
 
   constructor(config: WinceConfig) {
-    const store    = createStore({
-      strategies: config.storagePreference ?? ['localStorage', 'sessionStorage', 'cookie', 'memory'],
+    super({
+      consent: config.consent,
+      fetch: config.fetch,
+      onEventDropped: config.onEventDropped,
+      enrichmentReady: !config.enrichmentUrl,
+    });
+
+    const store = createStore({
+      strategies: config.storagePreference ?? [
+        'localStorage',
+        'sessionStorage',
+        'cookie',
+        'memory',
+      ],
     });
     const minStore = toMinimalStore(store);
-    this._store    = store;
+    this._store = store;
     this._minStore = minStore;
-    this._fetch    = config.fetch;
 
     // Resolve consent provider first — needed to compute initial store policy.
-    this._consent = config.consent === undefined ? globalConsent : config.consent;
-
-    // Determine whether to pass a persistent store to session/identity now,
-    // or defer until consent is granted (cookieless on_reject / always modes).
     const initialGranted = this._consent === null || this._consent.isGranted();
     const usePersistentStore =
       config.cookieless !== 'always' &&
       (config.cookieless !== 'on_reject' || initialGranted);
 
-    this._session  = new SessionManager({
+    this._session = new SessionManager({
       idleTimeoutMs: config.sessionIdleTimeoutMs,
       maxDurationMs: config.sessionMaxDurationMs,
       store: usePersistentStore ? minStore : undefined,
     });
-    this._identity = new IdentityManager({ store: usePersistentStore ? minStore : undefined });
-    this._seq      = new SequenceCounter();
-    this._windowId = getOrCreateWindowId();
-    this._onEventDropped = config.onEventDropped;
+    this._identity = new IdentityManager({
+      store: usePersistentStore ? minStore : undefined,
+    });
+    this._seq = new SequenceCounter();
 
     if (config.sampleRate !== undefined && config.sampleRate < 1) {
       this._sampler = new SamplingFilter({ rate: config.sampleRate });
@@ -222,43 +216,42 @@ export class WinceClient {
     // consent is OK and enrichment (if configured) has resolved.
     this._enrichmentReady = !config.enrichmentUrl;
 
-    this._transport = new Transport({
-      url:            config.endpoint,
-      compress:       config.compress       ?? true,
-      batchSize:      config.batchSize      ?? 20,
-      batchTimeoutMs: config.batchTimeoutMs ?? 2_000,
-      maxBufferSize:  config.maxBufferSize  ?? 500,
-      headers:        config.headers,
-      retry:          config.retry,
-      fetch:          config.fetch,
+    this._transport = createClientTransport({
+      url: config.endpoint,
+      compress: config.compress,
+      batchSize: config.batchSize,
+      batchTimeoutMs: config.batchTimeoutMs,
+      maxBufferSize: config.maxBufferSize,
+      headers: config.headers,
+      retry: config.retry,
+      fetch: config.fetch,
       paused: true,
       onDropped: (reason, item) => {
-        this._diag.droppedByReason[reason] = (this._diag.droppedByReason[reason] ?? 0) + 1;
+        this._diag.droppedByReason[reason] =
+          (this._diag.droppedByReason[reason] ?? 0) + 1;
         this._onEventDropped?.(reason, item);
       },
-      onBatchDelivered: (eids) => { this._diag.sent += eids.length; },
+      onBatchDelivered: (eids) => {
+        this._diag.sent += eids.length;
+      },
       eventPriority: (event) => {
         const t = event['t'] as string | undefined;
         if (t === '$checkout_complete') return 100;
-        if (t === '$form_abandon')      return  90;
-        if (t?.startsWith('$cart_'))   return  80;
+        if (t === '$form_abandon') return 90;
+        if (t?.startsWith('$cart_')) return 80;
         return 10;
       },
     });
 
     // React to consent status changes.
     if (this._consent !== null) {
-      this._unsubConsent = this._consent.onChange((status) => {
-        if (status === ConsentStatus.GRANTED) {
-          // In on_reject mode: migrate in-memory identity/session to persistent store.
-          if (config.cookieless === 'on_reject') {
-            this._identity.migrateToStore(this._minStore);
-            this._session.migrateToStore(this._minStore);
-          }
-          this._maybeStart();
-        } else {
-          this._transport.pause();
-        }
+      this._unsubConsent = wireConsent(this._consent, config.cookieless, {
+        onGrant: () => this._maybeStart(),
+        onRevoke: () => this._transport.pause(),
+        onMigrate: () => {
+          this._identity.migrateToStore(this._minStore);
+          this._session.migrateToStore(this._minStore);
+        },
       });
     }
 
@@ -272,7 +265,10 @@ export class WinceClient {
 
     // Kick off enrichment or start the transport immediately.
     if (config.enrichmentUrl) {
-      void this._runEnrichment(config.enrichmentUrl, config.enrichmentTimeoutMs ?? 1_500);
+      void this._runEnrichment(
+        config.enrichmentUrl,
+        config.enrichmentTimeoutMs ?? 1_500,
+      );
     } else {
       this._maybeStart();
     }
@@ -291,12 +287,19 @@ export class WinceClient {
    *   `$set` is applied on every occurrence; `$set_once` only when the key
    *   is not yet present on the backend user record.
    */
-  track(name: string, props?: Record<string, unknown>, personProps?: PersonProps): void {
+  track(
+    name: string,
+    props?: Record<string, unknown>,
+    personProps?: PersonProps,
+  ): void {
     if (this._consent !== null && !this._consent.isGranted()) {
       this._drop('consent');
       return;
     }
-    if (this._sampler && !this._sampler.shouldTrack(this._identity.getAnonId())) {
+    if (
+      this._sampler &&
+      !this._sampler.shouldTrack(this._identity.getAnonId())
+    ) {
       this._drop('sampling');
       return;
     }
@@ -313,7 +316,10 @@ export class WinceClient {
       this._drop('consent');
       return;
     }
-    if (this._sampler && !this._sampler.shouldTrack(this._identity.getAnonId())) {
+    if (
+      this._sampler &&
+      !this._sampler.shouldTrack(this._identity.getAnonId())
+    ) {
       this._drop('sampling');
       return;
     }
@@ -329,13 +335,16 @@ export class WinceClient {
     this._recentEvents.set(dedupKey, true);
 
     this._prevPageviewId = this._pageviewId;
-    this._pageviewId     = uuidv7();
+    this._pageviewId = uuidv7();
 
     this._enqueueRaw(
       '$page_view',
       {
-        title: typeof document !== 'undefined' ? document.title                    : undefined,
-        ref:   typeof document !== 'undefined' ? (document.referrer || undefined)  : undefined,
+        title: typeof document !== 'undefined' ? document.title : undefined,
+        ref:
+          typeof document !== 'undefined'
+            ? document.referrer || undefined
+            : undefined,
         ...props,
       },
       this._pageviewId,
@@ -353,7 +362,13 @@ export class WinceClient {
   identify(uid: string, traits?: PersonProps): void {
     this._identity.identify(uid, traits);
     if (traits?.$set || traits?.$set_once) {
-      this._enqueueRaw('$identify', undefined, this._pageviewId, undefined, traits);
+      this._enqueueRaw(
+        '$identify',
+        undefined,
+        this._pageviewId,
+        undefined,
+        traits,
+      );
     }
   }
 
@@ -365,7 +380,7 @@ export class WinceClient {
     this._identity.reset();
     this._session.reset();
     this._seq.reset();
-    this._pageviewId     = undefined;
+    this._pageviewId = undefined;
     this._prevPageviewId = undefined;
     // Clear per-user dedup state and near-error context so the new session
     // is not affected by events from the previous user.
@@ -374,26 +389,6 @@ export class WinceClient {
     if (this._lastErrorTimer !== undefined) {
       clearTimeout(this._lastErrorTimer);
       this._lastErrorTimer = undefined;
-    }
-  }
-
-  /** Grant tracking consent and resume the transport. */
-  optIn(): void {
-    if (this._consent instanceof ConsentManager) {
-      this._consent.optIn();
-    } else {
-      // Custom or null provider — no onChange fired, so start manually.
-      this._maybeStart();
-    }
-  }
-
-  /** Revoke tracking consent and pause the transport. */
-  optOut(): void {
-    if (this._consent instanceof ConsentManager) {
-      // ConsentManager.optOut() fires onChange(DENIED) → transport.pause().
-      this._consent.optOut();
-    } else {
-      this._transport.pause();
     }
   }
 
@@ -423,11 +418,6 @@ export class WinceClient {
    * Starts the transport when all pre-conditions are met:
    * consent is granted (or not required) AND enrichment has resolved.
    */
-  private _maybeStart(): void {
-    if (!this._enrichmentReady) return;
-    if (this._consent !== null && !this._consent.isGranted()) return;
-    this._transport.start();
-  }
 
   /**
    * Fire a GET request to `enrichmentUrl`, merge the response into the first
@@ -435,40 +425,20 @@ export class WinceClient {
    */
   private async _runEnrichment(url: string, timeoutMs: number): Promise<void> {
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-      const fetchUrl = new URL(url, typeof location !== 'undefined' ? location.href : undefined);
-      fetchUrl.searchParams.set('anon', this._identity.getAnonId());
-      fetchUrl.searchParams.set('session', this._session.getSid());
-
-      const fetchFn = this._fetch ?? fetch;
-      const resp = await fetchFn(fetchUrl.toString(), { signal: controller.signal, method: 'GET' });
-      clearTimeout(timer);
-
-      if (resp.ok) {
-        const raw: unknown = await resp.json();
-        if (raw && typeof raw === 'object') {
-          const data = raw as Record<string, unknown>;
-          const $set     = data.$set     instanceof Object && !Array.isArray(data.$set)
-            ? data.$set     as Record<string, unknown> : undefined;
-          const $set_once = data.$set_once instanceof Object && !Array.isArray(data.$set_once)
-            ? data.$set_once as Record<string, unknown> : undefined;
-          const uid = typeof data.uid === 'string' ? data.uid : undefined;
-
-          if (uid) {
-            this.identify(uid, { $set, $set_once });
-          } else if ($set || $set_once) {
-            this._enrichmentPersonProps = { $set, $set_once };
-          }
-
-          // Remaining fields (e.g. utm_source) → merged into the first event.
-          const { uid: _u, $set: _s, $set_once: _so, ...rest } = data;
-          if (Object.keys(rest).length > 0) this._enrichmentProps = rest;
-        }
+      const res = await fetchEnrichment(
+        url,
+        () => this._identity.getAnonId(),
+        () => this._session.getSid(),
+        this._fetch,
+        timeoutMs,
+      );
+      if (res) {
+        if (res.uid) this.identify(res.uid, res.personProps);
+        else if (res.personProps) this._enrichmentPersonProps = res.personProps;
+        if (res.props) this._enrichmentProps = res.props;
       }
     } catch {
-      // Timeout, network error, or JSON parse error — proceed without enrichment.
+      // proceed without enrichment on any error
     } finally {
       this._enrichmentReady = true;
       // Flush events buffered before enrichment resolved. Apply props to the
@@ -477,15 +447,15 @@ export class WinceClient {
       if (this._preEnrichQueue.length > 0) {
         const queue = this._preEnrichQueue;
         this._preEnrichQueue = [];
-        let applied = false;
-        for (const ev of queue) {
-          if (!applied && ev.t !== '$identify') {
-            this._dispatchEvent(this._applyEnrichmentOnce(ev));
-            applied = true;
-          } else {
-            this._dispatchEvent(ev);
-          }
-        }
+        const { events } = applyEnrichmentOnceToEvents(
+          queue,
+          this._enrichmentProps,
+          this._enrichmentPersonProps,
+        );
+        // Clear one-shot enrichment props after applying
+        this._enrichmentProps = undefined;
+        this._enrichmentPersonProps = undefined;
+        for (const ev of events) this._dispatchEvent(ev);
       }
       this._maybeStart();
     }
@@ -496,17 +466,16 @@ export class WinceClient {
    * support tooling, and debugging dropped events.
    */
   diagnostics(): WinceDiagnostics {
-    const dropped = Object.values(this._diag.droppedByReason).reduce((a, b) => a + (b ?? 0), 0);
+    const base = buildBaseDiagnostics(
+      this._diag,
+      this._transport,
+      Promise.resolve(0),
+    );
     return {
-      eventsQueued:    this._transport.queueSize,
-      eventsSent:      this._diag.sent,
-      eventsDropped:   dropped,
-      droppedByReason: { ...this._diag.droppedByReason },
-      circuitOpen:     this._transport.circuitOpen,
-      idbQueueSize:    Promise.resolve(0), // no IDB on main-thread path
-      sessionId:       this._session.peekSid(),
-      windowId:        this._windowId,
-      anonId:          this._identity.getAnonId(),
+      ...base,
+      sessionId: this._session.peekSid(),
+      windowId: this._windowId,
+      anonId: this._identity.getAnonId(),
     };
   }
 
@@ -514,23 +483,18 @@ export class WinceClient {
   // Internals
   // -------------------------------------------------------------------------
 
-  private _drop(reason: DropReason): void {
-    this._diag.droppedByReason[reason] = (this._diag.droppedByReason[reason] ?? 0) + 1;
-    this._onEventDropped?.(reason);
-  }
-
   /**
    * Build, pipeline-enrich, and send one event.
    * All public tracking methods funnel through here so enrichment logic
    * lives in exactly one place — easy to extend in future phases.
    */
   private _enqueueRaw(
-    name:              string,
-    props:             Record<string, unknown> | undefined,
-    pageview_id:       string | undefined,
+    name: string,
+    props: Record<string, unknown> | undefined,
+    pageview_id: string | undefined,
     prev_pageview_id?: string,
-    personProps?:      PersonProps,
-    dedupKey?:         string | false,  // string = override key; false = skip dedup (already checked by caller)
+    personProps?: PersonProps,
+    dedupKey?: string | false, // string = override key; false = skip dedup (already checked by caller)
   ): void {
     // Client-side dedup: drop repeated identical event+props within the TTL window.
     if (dedupKey !== false) {
@@ -545,25 +509,29 @@ export class WinceClient {
     this._session.touch();
 
     // Near-error context: tag events that fire within 30 s of an unhandled crash.
-    const finalProps = name !== '$error' && this._lastErrorEid
-      ? { $near_error: true, $error_eid: this._lastErrorEid, ...props }
-      : props;
+    const finalProps =
+      name !== '$error' && this._lastErrorEid
+        ? { $near_error: true, $error_eid: this._lastErrorEid, ...props }
+        : props;
 
     const eid = uuidv7();
     const raw: TrackEvent = {
       eid,
-      seq:  this._seq.next(),
-      t:    name,
-      ts:   Date.now(),
-      sid:  this._session.getSid(),
+      seq: this._seq.next(),
+      t: name,
+      ts: Date.now(),
+      sid: this._session.getSid(),
       anon: this._identity.getAnonId(),
-      uid:  this._identity.getUserId(),
+      uid: this._identity.getUserId(),
       props: finalProps,
-      $set:      personProps?.$set,
+      $set: personProps?.$set,
       $set_once: personProps?.$set_once,
-      url:  typeof document !== 'undefined' ? document.URL                    : undefined,
-      ref:  typeof document !== 'undefined' ? (document.referrer || undefined) : undefined,
-      window_id:   this._windowId,
+      url: typeof document !== 'undefined' ? document.URL : undefined,
+      ref:
+        typeof document !== 'undefined'
+          ? document.referrer || undefined
+          : undefined,
+      window_id: this._windowId,
       pageview_id,
       prev_pageview_id,
       anon_prev: this._identity.getAndClearAnonPrev(),
@@ -572,8 +540,11 @@ export class WinceClient {
     // Record error EID so subsequent events can be tagged with $near_error.
     if (name === '$error') {
       this._lastErrorEid = eid;
-      if (this._lastErrorTimer !== undefined) clearTimeout(this._lastErrorTimer);
-      this._lastErrorTimer = setTimeout(() => { this._lastErrorEid = undefined; }, 30_000);
+      if (this._lastErrorTimer !== undefined)
+        clearTimeout(this._lastErrorTimer);
+      this._lastErrorTimer = setTimeout(() => {
+        this._lastErrorEid = undefined;
+      }, 30_000);
     }
 
     if (!this._enrichmentReady) {
@@ -592,13 +563,16 @@ export class WinceClient {
     const result: TrackEvent = {
       ...raw,
       props: this._enrichmentProps
-        ? { ...this._enrichmentProps, ...raw.props } : raw.props,
+        ? { ...this._enrichmentProps, ...raw.props }
+        : raw.props,
       $set: this._enrichmentPersonProps
-        ? { ...this._enrichmentPersonProps.$set, ...raw.$set } : raw.$set,
+        ? { ...this._enrichmentPersonProps.$set, ...raw.$set }
+        : raw.$set,
       $set_once: this._enrichmentPersonProps
-        ? { ...this._enrichmentPersonProps.$set_once, ...raw.$set_once } : raw.$set_once,
+        ? { ...this._enrichmentPersonProps.$set_once, ...raw.$set_once }
+        : raw.$set_once,
     };
-    this._enrichmentProps       = undefined;
+    this._enrichmentProps = undefined;
     this._enrichmentPersonProps = undefined;
     return result;
   }
@@ -616,21 +590,32 @@ export class WinceClient {
     if (typeof window === 'undefined') return;
 
     const onPageHide = () => {
-      this._store.flush?.();  // flush pending store writes before the page unloads
+      this._store.flush?.(); // flush pending store writes before the page unloads
       this._transport.drain();
     };
-    const onOffline  = () => this._transport.pause();
-    const onOnline   = () => { this._maybeStart(); };
+    const onOffline = () => this._transport.pause();
+    const onOnline = () => {
+      this._maybeStart();
+    };
 
     window.addEventListener('pagehide', onPageHide);
-    window.addEventListener('offline',  onOffline);
-    window.addEventListener('online',   onOnline);
+    window.addEventListener('offline', onOffline);
+    window.addEventListener('online', onOnline);
 
     // Network quality adaptation — adjust batch config based on effective connection type.
-    const conn = (navigator as Navigator & { connection?: { effectiveType?: string; addEventListener?(t: string, fn: () => void): void; removeEventListener?(t: string, fn: () => void): void } }).connection;
+    const conn = (
+      navigator as Navigator & {
+        connection?: {
+          effectiveType?: string;
+          addEventListener?(t: string, fn: () => void): void;
+          removeEventListener?(t: string, fn: () => void): void;
+        };
+      }
+    ).connection;
     const applyConnectionConfig = () => {
       const cfg = _batchConfigForConnection(conn?.effectiveType ?? '');
-      if (cfg) this._transport.updateBatchConfig(cfg.batchSize, cfg.batchTimeoutMs);
+      if (cfg)
+        this._transport.updateBatchConfig(cfg.batchSize, cfg.batchTimeoutMs);
     };
 
     if (conn) {
@@ -640,8 +625,8 @@ export class WinceClient {
 
     this._removeListeners = () => {
       window.removeEventListener('pagehide', onPageHide);
-      window.removeEventListener('offline',  onOffline);
-      window.removeEventListener('online',   onOnline);
+      window.removeEventListener('offline', onOffline);
+      window.removeEventListener('online', onOnline);
       conn?.removeEventListener?.('change', applyConnectionConfig);
     };
   }
@@ -651,15 +636,23 @@ export class WinceClient {
 // Network quality — batch config overrides
 // ---------------------------------------------------------------------------
 
-interface BatchConfig { batchSize: number; batchTimeoutMs: number; }
+interface BatchConfig {
+  batchSize: number;
+  batchTimeoutMs: number;
+}
 
 function _batchConfigForConnection(effectiveType: string): BatchConfig | null {
   switch (effectiveType) {
-    case '4g':      return { batchSize: 20, batchTimeoutMs: 2_000 };
-    case '3g':      return { batchSize: 10, batchTimeoutMs: 3_000 };
-    case '2g':      return { batchSize:  5, batchTimeoutMs: 5_000 };
-    case 'slow-2g': return { batchSize:  3, batchTimeoutMs: 8_000 };
-    default:        return null; // keep configured defaults
+    case '4g':
+      return { batchSize: 20, batchTimeoutMs: 2_000 };
+    case '3g':
+      return { batchSize: 10, batchTimeoutMs: 3_000 };
+    case '2g':
+      return { batchSize: 5, batchTimeoutMs: 5_000 };
+    case 'slow-2g':
+      return { batchSize: 3, batchTimeoutMs: 8_000 };
+    default:
+      return null; // keep configured defaults
   }
 }
 

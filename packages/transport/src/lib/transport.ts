@@ -2,6 +2,7 @@ import { compressSync } from '@wince/compress';
 import { Exporter } from './exporter';
 import { HttpSender } from './httpSender';
 import type { EventPayload, TransportOptions } from './types';
+import { BeaconClient } from './beaconClient';
 
 const SCHEMA_VERSION = 1;
 
@@ -29,10 +30,10 @@ export class Transport {
     if (this._useCompression) headers['Content-Encoding'] = 'gzip';
 
     const sender = new HttpSender({
-      endpoint:         opts.url,
+      endpoint: opts.url,
       headers,
       requestTimeoutMs: opts.requestTimeoutMs,
-      fetch:            opts.fetch,
+      fetch: opts.fetch,
     });
 
     this._exporter = new Exporter<EventPayload>({
@@ -41,21 +42,23 @@ export class Transport {
         const payload = buildEnvelope(batch);
         return this._useCompression ? compressSync(payload) : payload;
       },
-      batchSize:       opts.batchSize      ?? 10,
+      batchSize: opts.batchSize ?? 10,
       flushIntervalMs: opts.batchTimeoutMs ?? 1_000,
-      maxBufferSize:   opts.maxBufferSize  ?? 500,
+      maxBufferSize: opts.maxBufferSize ?? 500,
       retry: {
-        attempts:    opts.retry?.attempts,
+        attempts: opts.retry?.attempts,
         baseDelayMs: opts.retry?.baseDelayMs,
-        maxDelayMs:  opts.retry?.maxDelayMs,
-        factor:      opts.retry?.factor,
-        jitter:      opts.retry?.jitter,
+        maxDelayMs: opts.retry?.maxDelayMs,
+        factor: opts.retry?.factor,
+        jitter: opts.retry?.jitter,
       },
       onDropped: opts.onDropped,
       onBatchDelivered: opts.onBatchDelivered
         ? (items) => {
             const eids = items
-              .map((e) => (typeof e['eid'] === 'string' ? (e['eid'] as string) : null))
+              .map((e) =>
+                typeof e['eid'] === 'string' ? (e['eid'] as string) : null,
+              )
               .filter((id): id is string => id !== null);
             if (eids.length > 0) opts.onBatchDelivered!(eids);
           }
@@ -72,8 +75,12 @@ export class Transport {
     this._exporter.enqueue(event);
   }
 
-  get queueSize(): number    { return this._exporter.queueSize; }
-  get circuitOpen(): boolean { return this._exporter.circuitOpen; }
+  get queueSize(): number {
+    return this._exporter.queueSize;
+  }
+  get circuitOpen(): boolean {
+    return this._exporter.circuitOpen;
+  }
 
   /**
    * Resume automatic flushing. Call after consent is confirmed or
@@ -107,10 +114,13 @@ export class Transport {
   drain(): void {
     const hasBeacon =
       typeof navigator !== 'undefined' &&
-      typeof (navigator as Navigator & { sendBeacon?: unknown }).sendBeacon === 'function';
+      typeof (navigator as Navigator & { sendBeacon?: unknown }).sendBeacon ===
+        'function';
 
     if (!hasBeacon) {
-      void this._exporter.flush().catch(() => { /* best-effort */ });
+      void this._exporter.flush().catch(() => {
+        /* best-effort */
+      });
       return;
     }
 
@@ -118,9 +128,15 @@ export class Transport {
     this._exporter.drain({
       encodeSync: (batch) => buildEnvelope(batch),
       send: (data) => {
-        const type = typeof data === 'string' ? 'application/json' : 'application/octet-stream';
-        (navigator as Navigator & { sendBeacon: (u: string, b: Blob) => boolean })
-          .sendBeacon(url, new Blob([data as BlobPart], { type }));
+        const type =
+          typeof data === 'string'
+            ? 'application/json'
+            : 'application/octet-stream';
+        (
+          navigator as Navigator & {
+            sendBeacon: (u: string, b: Blob) => boolean;
+          }
+        ).sendBeacon(url, new Blob([data as BlobPart], { type }));
       },
     });
   }
@@ -136,4 +152,41 @@ export class Transport {
 
 export default Transport;
 
+/**
+ * Create a default Transport instance for browser usage.
+ * Uses BeaconClient with a Fetch fallback and enables compression by default.
+ */
+export function createDefaultTransport(
+  url: string,
+  opts?: Partial<TransportOptions>,
+) {
+  const client = new BeaconClient();
+  const transport = new Transport({
+    url,
+    compress: opts?.compress ?? true,
+    client,
+    batchSize: opts?.batchSize,
+    batchTimeoutMs: opts?.batchTimeoutMs,
+    headers: opts?.headers,
+    retry: opts?.retry,
+  } as TransportOptions);
+  return transport;
+}
+
+export function createClientTransport(opts: TransportOptions): Transport {
+  return new Transport({
+    url: opts.url,
+    compress: opts.compress ?? true,
+    batchSize: opts.batchSize ?? 20,
+    batchTimeoutMs: opts.batchTimeoutMs ?? 2_000,
+    maxBufferSize: opts.maxBufferSize ?? 500,
+    headers: opts.headers,
+    retry: opts.retry ,
+    fetch: opts.fetch,
+    paused: opts.paused ?? true,
+    onDropped: opts.onDropped,
+    onBatchDelivered: opts.onBatchDelivered,
+    eventPriority: opts.eventPriority,
+  });
+}
 
