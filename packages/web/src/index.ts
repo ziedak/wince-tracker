@@ -20,5 +20,13 @@ export type { FormAbandonOptions } from './plugins/formAbandon';
 export { mountErrorCapture } from './plugins/errorCapture';
 export type { ErrorCaptureOptions } from './plugins/errorCapture';
 
+// Interaction insight plugins
+export { mountDeadClick } from './plugins/deadClick';
+export type { DeadClickOptions } from './plugins/deadClick';
+export { mountCopyPaste } from './plugins/copyPaste';
+export { mountExitIntent } from './plugins/exitIntent';
+export { mountFormInteraction } from './plugins/formInteraction';
+export type { FormInteractionOptions } from './plugins/formInteraction';
+
 // Web Worker integration (enrichment + IDB persistence off main thread)
 export { WorkerClient, initWithWorker } from './worker/client';

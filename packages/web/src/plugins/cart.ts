@@ -43,6 +43,10 @@ export interface CartEventDetail {
  * const cleanup = mountCart(tracker);
  * ```
  */
+const KNOWN_ACTIONS = new Set<string>([
+  'add', 'remove', 'update', 'checkout_start', 'checkout_complete',
+]);
+
 export function mountCart(tracker: WinceClient): () => void {
   if (typeof document === 'undefined') return () => undefined;
 
@@ -50,6 +54,7 @@ export function mountCart(tracker: WinceClient): () => void {
     const detail = (e as CustomEvent<CartEventDetail>).detail;
     if (!detail || typeof detail !== 'object') return;
     const { action, ...rest } = detail;
+    if (!KNOWN_ACTIONS.has(action)) return;
     tracker.track(`$cart_${action}`, rest);
   };
 

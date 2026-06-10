@@ -279,7 +279,7 @@ let _cachedRootDomain: string | null = null;
  * cookie on progressively shorter subdomains. Browsers reject public suffixes
  * (.com, .co.uk), so the first subdomain they accept is the root.
  *
- * Adapted from PostHog's seekFirstNonPublicSubDomain.
+ * Adapted from 's seekFirstNonPublicSubDomain.
  */
 export function getRootDomain(hostname: string): string {
   if (_cachedRootDomain !== null) return _cachedRootDomain;

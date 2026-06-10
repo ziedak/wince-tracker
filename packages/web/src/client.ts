@@ -171,6 +171,7 @@ export class WinceClient extends BaseClient {
   private _preEnrichQueue: TrackEvent[] = [];
   private _lastErrorEid?: string;
   private _lastErrorTimer?: ReturnType<typeof setTimeout>;
+  private _beforeDrainHooks: Array<() => void> = [];
 
   constructor(config: WinceConfig) {
     super({
@@ -410,6 +411,20 @@ export class WinceClient extends BaseClient {
     await this._transport.close();
   }
 
+  /**
+   * Register a callback to be invoked immediately before the transport drains
+   * on `pagehide`. Use this to enqueue final events (e.g. `$page_leave`) so
+   * they are included in the sendBeacon payload.
+   *
+   * @returns A function that removes the hook.
+   */
+  addBeforeDrainHook(fn: () => void): () => void {
+    this._beforeDrainHooks.push(fn);
+    return () => {
+      this._beforeDrainHooks = this._beforeDrainHooks.filter((h) => h !== fn);
+    };
+  }
+
   // -------------------------------------------------------------------------
   // Diagnostics
   // -------------------------------------------------------------------------
@@ -590,12 +605,14 @@ export class WinceClient extends BaseClient {
     if (typeof window === 'undefined') return;
 
     const onPageHide = () => {
+      for (const hook of this._beforeDrainHooks) hook();
       this._store.flush?.(); // flush pending store writes before the page unloads
       this._transport.drain();
     };
     const onOffline = () => this._transport.pause();
     const onOnline = () => {
       this._maybeStart();
+      void this._transport.flush(); // immediately drain buffered events on reconnect
     };
 
     window.addEventListener('pagehide', onPageHide);

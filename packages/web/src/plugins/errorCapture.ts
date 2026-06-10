@@ -1,4 +1,3 @@
-import { LRUCache } from '@wince/cache';
 import type { WinceClient } from '../client';
 
 // ---------------------------------------------------------------------------
@@ -70,16 +69,22 @@ export function mountErrorCapture(
   const ignore                     = options.ignore                     ?? [];
 
   // Dedup: same error message + line number → only captured once per session.
-  const seen = new LRUCache<string, true>({ maxSize: 20 });
+  // Plain Map + FIFO eviction is sufficient for a max-20 set; the LRU linked-list
+  // overhead from @wince/cache is wasted here.
+  const _dedupKeys = new Map<string, true>();
+
+  function deduped(key: string): boolean {
+    if (_dedupKeys.has(key)) return true;
+    if (_dedupKeys.size >= 20) {
+      // FIFO eviction — delete the oldest entry (Map iterator returns in insertion order).
+      _dedupKeys.delete(_dedupKeys.keys().next().value!);
+    }
+    _dedupKeys.set(key, true);
+    return false;
+  }
 
   function shouldIgnore(message: string): boolean {
     return ignore.some((re) => re.test(message));
-  }
-
-  function deduped(key: string): boolean {
-    if (seen.get(key)) return true;
-    seen.set(key, true);
-    return false;
   }
 
   function trimStack(stack: string | undefined): string | undefined {

@@ -1,5 +1,5 @@
 import type { WinceClient } from '../client';
-import { sanitizeClick, type ClickData } from './_click-utils';
+import { useClickCapture, type ClickData } from './_click-utils';
 
 export type { ClickData };
 
@@ -21,31 +21,35 @@ function getLabel(el: Element): string | undefined {
  * input[type=button], label, [role=button], [data-track]`). Password fields and
  * payment-card inputs are silently ignored. Label text is capped at 256 chars.
  *
+ * Uses the shared `useClickCapture` dispatcher so `sanitizeClick()` runs
+ * exactly once per click even when multiple click plugins are mounted.
+ *
  * @returns A cleanup function that removes the event listener.
  */
 export function mountClick(tracker: WinceClient): () => void {
   if (typeof document === 'undefined') return () => undefined;
 
-  const handler = (e: MouseEvent) => {
-    const data = sanitizeClick(e);
-    if (!data) return;
-
+  return useClickCapture((data) => {
     const props: Record<string, unknown> = {
-      tag:  data.tag,
-      text: data.text,
-      ...data.attrs,
+      tag:             data.tag,
+      text:            data.text,
+      elements_chain:  data.elements_chain,
     };
+
+    // Own-property guard — avoids prototype pollution via …data.attrs spread.
+    for (const k of Object.keys(data.attrs)) {
+      if (Object.prototype.hasOwnProperty.call(data.attrs, k)) {
+        props[k] = data.attrs[k];
+      }
+    }
 
     if (data.href)    props['href']     = data.href;
     if (data.trackId) props['track_id'] = data.trackId;
+    if (data.hasModifier) props['has_modifier'] = data.hasModifier;
 
     const label = getLabel(data.target as Element);
     if (label) props['label'] = label;
 
     tracker.track('$click', props);
-  };
-
-  document.addEventListener('click', handler, { capture: true });
-
-  return () => document.removeEventListener('click', handler, { capture: true });
+  });
 }

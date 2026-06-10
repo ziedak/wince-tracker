@@ -1,5 +1,5 @@
 import type { WinceClient } from '../client';
-import { sanitizeClick } from './_click-utils';
+import { useClickCapture } from './_click-utils';
 
 export interface RageClickOptions {
   /** Number of clicks within `windowMs` that triggers a rage-click. Default: 3. */
@@ -23,6 +23,9 @@ interface ClickRecord {
  * times within `windowMs` milliseconds. Uses the same element whitelist and
  * PII exclusions as `mountClick` via the shared `sanitizeClick()` utility.
  *
+ * Uses the shared `useClickCapture` dispatcher so `sanitizeClick()` runs
+ * exactly once per click even when multiple click plugins are mounted.
+ *
  * @returns A cleanup function that removes the event listener.
  */
 export function mountRageClick(tracker: WinceClient, options?: RageClickOptions): () => void {
@@ -44,10 +47,7 @@ export function mountRageClick(tracker: WinceClient, options?: RageClickOptions)
     return t;
   }
 
-  const handler = (e: MouseEvent) => {
-    const data = sanitizeClick(e);
-    if (!data) return;
-
+  const unsub = useClickCapture((data) => {
     const el  = data.target as Element;
     const now = Date.now();
     const rec = records.get(el);
@@ -62,15 +62,26 @@ export function mountRageClick(tracker: WinceClient, options?: RageClickOptions)
         clearTimeout(rec.timer);
         timers.delete(rec.timer);
         records.delete(el);
-        tracker.track('$rage_click', {
-          tag:      data.tag,
-          text:     data.text,
-          href:     data.href,
-          track_id: data.trackId,
-          count:    rec.count,
-          first_at: rec.firstAt,
-          ...data.attrs,
-        });
+
+        const props: Record<string, unknown> = {
+          tag:            data.tag,
+          text:           data.text,
+          elements_chain: data.elements_chain,
+          count:          rec.count,
+          first_at:       rec.firstAt,
+        };
+
+        if (data.href)    props['href']     = data.href;
+        if (data.trackId) props['track_id'] = data.trackId;
+
+        // Own-property guard — avoids prototype pollution via …data.attrs spread.
+        for (const k of Object.keys(data.attrs)) {
+          if (Object.prototype.hasOwnProperty.call(data.attrs, k)) {
+            props[k] = data.attrs[k];
+          }
+        }
+
+        tracker.track('$rage_click', props);
       }
     } else {
       if (rec) {
@@ -83,13 +94,12 @@ export function mountRageClick(tracker: WinceClient, options?: RageClickOptions)
         timer:   armTimer(el, idleMs),
       });
     }
-  };
-
-  document.addEventListener('click', handler, { capture: true });
+  });
 
   return () => {
-    document.removeEventListener('click', handler, { capture: true });
+    unsub();
     for (const t of timers) clearTimeout(t);
     timers.clear();
   };
 }
+

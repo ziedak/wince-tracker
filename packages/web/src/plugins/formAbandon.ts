@@ -99,23 +99,61 @@ export function mountFormAbandon(
   // Track which forms have been submitted so we can suppress abandon events.
   const submittedForms = new WeakSet<HTMLFormElement>();
 
+  // Track which forms have at least one filled capturable field — only these
+  // need to be scanned on pagehide (avoids O(all forms) querySelectorAll).
+  const dirtyForms = new Set<HTMLFormElement>();
+
+  function markDirty(e: Event): void {
+    const input = e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+    const form = (input as HTMLInputElement).form;
+    if (!form || submittedForms.has(form) || dirtyForms.has(form)) return;
+    const val = ((input as HTMLInputElement).value || '').trim();
+    if (val.length >= minLength && !isExcluded(input as HTMLInputElement, excludeTypes) && isCapturable(input as HTMLInputElement, captureFields)) {
+      dirtyForms.add(form);
+    }
+  }
+
   const onSubmit = (e: Event) => {
     const form = e.currentTarget as HTMLFormElement;
     submittedForms.add(form);
+    dirtyForms.delete(form);
   };
 
-  // Attach submit listeners to all current + future forms.
-  const formListeners = new Map<HTMLFormElement, () => void>();
+  // Attach submit + input listeners to all current + future forms.
+  const formListeners = new Map<HTMLFormElement, Array<() => void>>();
 
   function attachToForm(form: HTMLFormElement): void {
     if (formListeners.has(form)) return;
     form.addEventListener('submit', onSubmit);
-    formListeners.set(form, () => form.removeEventListener('submit', onSubmit));
+    form.addEventListener('input', markDirty, { passive: true });
+    formListeners.set(form, [
+      () => form.removeEventListener('submit', onSubmit),
+      () => form.removeEventListener('input', markDirty),
+    ]);
+  }
+
+  /** Remove all listeners from a form and drop it from tracked sets. */
+  function detachForm(form: HTMLFormElement): void {
+    const teardowns = formListeners.get(form);
+    if (!teardowns) return;
+    for (const fn of teardowns) fn();
+    formListeners.delete(form);
+    dirtyForms.delete(form);
   }
 
   // Observe DOM mutations for dynamically added forms.
   const observer = new MutationObserver((mutations) => {
     for (const m of mutations) {
+      // Clean up submit + input listeners on removed forms (avoids micro-leaks).
+      for (const node of Array.from(m.removedNodes)) {
+        if (node instanceof HTMLFormElement) {
+          detachForm(node);
+        } else if (node instanceof Element) {
+          for (const form of Array.from(node.querySelectorAll('form'))) {
+            detachForm(form as HTMLFormElement);
+          }
+        }
+      }
       for (const node of Array.from(m.addedNodes)) {
         if (node instanceof HTMLFormElement) {
           attachToForm(node);
@@ -139,8 +177,7 @@ export function mountFormAbandon(
   });
 
   const onPageHide = () => {
-    for (const form of Array.from(document.querySelectorAll('form'))) {
-      const f = form as HTMLFormElement;
+    for (const f of dirtyForms) {
       if (submittedForms.has(f)) continue;
 
       const fieldsFilled = new Set<string>();
@@ -168,12 +205,14 @@ export function mountFormAbandon(
     }
   };
 
-  window.addEventListener('pagehide', onPageHide);
+  // Register as a before-drain hook so $form_abandon fires before the transport
+  // drains on pagehide — ensuring the event is included in the beacon payload.
+  const removeBeforeDrainHook = tracker.addBeforeDrainHook(onPageHide);
 
   return () => {
-    window.removeEventListener('pagehide', onPageHide);
+    removeBeforeDrainHook();
     observer.disconnect();
-    for (const teardown of formListeners.values()) teardown();
+    for (const form of Array.from(formListeners.keys())) detachForm(form);
     formListeners.clear();
   };
 }
