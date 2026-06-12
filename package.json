@@ -57,6 +57,7 @@
     "live-server": "^1.2.2",
     "nx": "22.7.5",
     "prettier": "^3.8.1",
+    "puppeteer": "^25.1.0",
     "rollup": "^4.14.0",
     "rollup-plugin-esbuild": "^6.2.1",
     "swc-loader": "0.1.15",
