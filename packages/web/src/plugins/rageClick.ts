@@ -69,6 +69,7 @@ export function mountRageClick(tracker: WinceClient, options?: RageClickOptions)
           elements_chain: data.elements_chain,
           count:          rec.count,
           first_at:       rec.firstAt,
+          $plugin_source: 'rageClick',
         };
 
         if (data.href)    props['href']     = data.href;

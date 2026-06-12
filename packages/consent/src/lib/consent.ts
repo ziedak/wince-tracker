@@ -1,3 +1,6 @@
+import type { CookieStoreOptions } from '@wince/storage/cookie';
+import { CookieStore } from '@wince/storage/cookie';
+
 // ---------------------------------------------------------------------------
 // ConsentStatus
 // ---------------------------------------------------------------------------
@@ -23,51 +26,40 @@ export interface ConsentProvider {
 }
 
 // ---------------------------------------------------------------------------
+// ConsentManagerOptions
+// ---------------------------------------------------------------------------
+
+export type ConsentManagerOptions = {
+  /**
+   * Cookie name used to persist the consent decision.
+   * @default '__wince_consent'
+   */
+  cookieName?: string;
+  /**
+   * When true, DNT browser signal is ignored and the stored cookie value wins.
+   * Useful in test / playground environments where DNT is set by the browser
+   * but should not block consent.
+   * @default false
+   */
+  ignoreDnt?: boolean;
+} & Omit<CookieStoreOptions, 'sameSite'>; // SameSite is always Lax for consent
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-const CONSENT_COOKIE = '__wince_consent';
-const MAX_AGE_DAYS   = 365;
+const DEFAULT_COOKIE = '__wince_consent';
 
 function isDntEnabled(): boolean {
   if (typeof navigator === 'undefined') return false;
+  type DntNavigator = Navigator & { msDoNotTrack?: string };
+  type DntWindow    = Window   & { doNotTrack?: string };
+  const nav = navigator as DntNavigator;
   const raw =
-    (navigator as any).doNotTrack ??
-    (navigator as any).msDoNotTrack ??
-    (typeof window !== 'undefined' ? (window as any).doNotTrack : undefined);
-  return raw === '1' || raw === 'yes' || raw === 1;
-}
-
-function readCookie(name: string): string | null {
-  if (typeof document === 'undefined') return null;
-  const prefix = name + '=';
-  for (const part of document.cookie.split(';')) {
-    const s = part.trimStart();
-    if (s.startsWith(prefix)) {
-      return decodeURIComponent(s.slice(prefix.length));
-    }
-  }
-  return null;
-}
-
-function writeCookie(name: string, value: string, maxAgeDays: number): void {
-  if (typeof document === 'undefined') return;
-  const maxAge = maxAgeDays * 24 * 60 * 60;
-  // No HttpOnly — must be browser-readable. SameSite=Lax prevents CSRF misuse.
-  document.cookie =
-    `${name}=${encodeURIComponent(value)};max-age=${maxAge};path=/;SameSite=Lax`;
-}
-
-function deleteCookie(name: string): void {
-  if (typeof document === 'undefined') return;
-  document.cookie = `${name}=;max-age=0;path=/;SameSite=Lax`;
-}
-
-function readStoredStatus(): ConsentStatus {
-  const raw = readCookie(CONSENT_COOKIE);
-  if (raw === '1') return ConsentStatus.GRANTED;
-  if (raw === '0') return ConsentStatus.DENIED;
-  return ConsentStatus.PENDING;
+    nav.doNotTrack ??
+    nav.msDoNotTrack ??
+    (typeof window !== 'undefined' ? (window as DntWindow).doNotTrack : undefined);
+  return raw === '1' || raw === 'yes';
 }
 
 // ---------------------------------------------------------------------------
@@ -75,12 +67,25 @@ function readStoredStatus(): ConsentStatus {
 // ---------------------------------------------------------------------------
 
 export class ConsentManager implements ConsentProvider {
+  private readonly _store: CookieStore;
+  private readonly _cookieName: string;
+  private readonly _ignoreDnt: boolean;
   private _status: ConsentStatus;
   private _listeners: Array<(status: ConsentStatus) => void> = [];
 
-  constructor() {
-    // DNT takes precedence over any stored value.
-    this._status = isDntEnabled() ? ConsentStatus.DENIED : readStoredStatus();
+  constructor(opts: ConsentManagerOptions = {}) {
+    const { cookieName, ignoreDnt, ...cookieOpts } = opts;
+    this._cookieName = cookieName ?? DEFAULT_COOKIE;
+    this._ignoreDnt  = ignoreDnt ?? false;
+    // No HttpOnly — must be browser-readable. SameSite=Lax prevents CSRF misuse.
+    this._store = new CookieStore({ sameSite: 'Lax', ...cookieOpts });
+    // DNT takes precedence over any stored value (unless ignoreDnt is set).
+    this._status = (!this._ignoreDnt && isDntEnabled()) ? ConsentStatus.DENIED : this._readStoredStatus();
+  }
+
+  /** Returns true when the browser DNT signal is active and ignoreDnt is false. */
+  isDntActive(): boolean {
+    return !this._ignoreDnt && isDntEnabled();
   }
 
   getStatus(): ConsentStatus {
@@ -100,18 +105,18 @@ export class ConsentManager implements ConsentProvider {
   }
 
   optIn(): void {
-    writeCookie(CONSENT_COOKIE, '1', MAX_AGE_DAYS);
+    this._store.set(this._cookieName, 1);
     this._notify(ConsentStatus.GRANTED);
   }
 
   optOut(): void {
-    writeCookie(CONSENT_COOKIE, '0', MAX_AGE_DAYS);
+    this._store.set(this._cookieName, 0);
     this._notify(ConsentStatus.DENIED);
   }
 
   /** Remove stored consent — reverts to PENDING on next load. */
   clear(): void {
-    deleteCookie(CONSENT_COOKIE);
+    this._store.delete(this._cookieName);
     this._notify(ConsentStatus.PENDING);
   }
 
@@ -120,6 +125,14 @@ export class ConsentManager implements ConsentProvider {
     return () => {
       this._listeners = this._listeners.filter((l) => l !== callback);
     };
+  }
+
+  private _readStoredStatus(): ConsentStatus {
+    const raw = this._store.get<number>(this._cookieName);
+    // Support both numeric (new: 1/0) and legacy string ('1'/'0') cookie values.
+    if (raw === 1 || (raw as unknown) === '1') return ConsentStatus.GRANTED;
+    if (raw === 0 || (raw as unknown) === '0') return ConsentStatus.DENIED;
+    return ConsentStatus.PENDING;
   }
 
   private _notify(next: ConsentStatus): void {
@@ -137,3 +150,4 @@ export class ConsentManager implements ConsentProvider {
 
 export const consent = new ConsentManager();
 export default consent;
+

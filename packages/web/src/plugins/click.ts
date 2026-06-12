@@ -50,6 +50,6 @@ export function mountClick(tracker: WinceClient): () => void {
     const label = getLabel(data.target as Element);
     if (label) props['label'] = label;
 
-    tracker.track('$click', props);
+    tracker.track('$click', { ...props, $plugin_source: 'click' });
   });
 }

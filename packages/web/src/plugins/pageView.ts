@@ -126,13 +126,13 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
   let _pendingFirstPage = document.visibilityState !== 'visible';
 
   if (!_pendingFirstPage) {
-    tracker.page();
+    tracker.page({ $plugin_source: 'pageView' });
     resetMetrics();
   }
 
   // SPA navigation — fire page() with accumulated metrics, then reset.
   const onNavigate = () => {
-    tracker.page(buildMetrics());
+    tracker.page({ ...buildMetrics(), $plugin_source: 'pageView' });
     resetMetrics();
   };
 
@@ -227,7 +227,7 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
         if (_pendingFirstPage) {
           // Page was prerendered — fire the deferred first page view now.
           _pendingFirstPage = false;
-          tracker.page();
+          tracker.page({ $plugin_source: 'pageView' });
           resetMetrics(); // starts fresh timers from this moment
           return;
         }
@@ -246,7 +246,7 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
       if (document.visibilityState !== 'visible') return;
       _pendingFirstPage = false;
       document.removeEventListener('visibilitychange', onceVisible);
-      tracker.page();
+      tracker.page({ $plugin_source: 'pageView' });
       resetMetrics();
     };
     document.addEventListener('visibilitychange', onceVisible);
@@ -259,7 +259,7 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
   const removeBeforeDrainHook = tracker.addBeforeDrainHook(() => {
     if (_pendingFirstPage) return; // page was never made visible — no $page_view to pair with
     if (trackVisibility) snapshotVisibility();
-    tracker.track('$page_leave', buildMetrics('')); // no $prev_ prefix — metrics belong to this page
+    tracker.track('$page_leave', { ...buildMetrics(''), $plugin_source: 'pageView' }); // no $prev_ prefix — metrics belong to this page
   });
 
   window.addEventListener('popstate',   onNavigate);

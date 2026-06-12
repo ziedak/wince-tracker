@@ -73,6 +73,7 @@ export function mountCopyPaste(tracker: WinceClient): () => void {
       tag,
       text,
       href: (target as HTMLAnchorElement).href || undefined,
+      $plugin_source: 'copyPaste',
     });
   };
 

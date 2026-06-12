@@ -83,6 +83,7 @@ export function mountDeadClick(
         elements_chain: c.chain,
         elapsed_ms:     Date.now() - c.at,
         has_modifier:   c.modifier,
+        $plugin_source: 'deadClick',
       });
     }
     pending.length = 0;

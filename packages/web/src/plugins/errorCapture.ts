@@ -109,6 +109,7 @@ export function mountErrorCapture(
         lineno:  event.lineno    || undefined,
         colno:   event.colno     || undefined,
         stack:   trimStack((event.error as Error | undefined)?.stack),
+        $plugin_source: 'errorCapture',
       });
     };
 
@@ -134,6 +135,7 @@ export function mountErrorCapture(
         type:    'unhandled_rejection',
         message,
         stack:   trimStack(reason instanceof Error ? reason.stack : undefined),
+        $plugin_source: 'errorCapture',
       });
     };
 

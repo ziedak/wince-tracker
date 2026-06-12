@@ -1,27 +1,19 @@
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import {
- 
-  createStore,
-  getRootDomain,
-  resetRootDomainCache,
 
-} from './stores/storage';
-import { MemoryStore } from './stores/MemoryStore';
-import { LocalStore } from './stores/LocalStore';
-import { SessionStore } from './stores/SessionStore';
-import { CookieStore } from './stores/CookieStore';
 import { DurableQueue, PersistedEvent } from './DurableQueue';
+import { createMultiStore, CookieStore, LocalStore, SessionStore, MemoryStore, IStore } from './index';
+import { getRootDomain, resetRootDomainCache } from './stores/CookieStore';
 
 // ===========================================================================
 // MemoryStore
 // ===========================================================================
 
 describe('MemoryStore', () => {
-  let s: MemoryStore;
-  beforeEach(() => { s = new MemoryStore(); });
+  let s: IStore;
+  beforeEach(() => { s = MemoryStore; s.clear(); });
 
-  it('is always available', () => expect(s.isAvailable).toBe(true));
+  it('is always available', () => expect(s.isAvailable()).toBe(true));
   it('get returns undefined for missing key', () => expect(s.get('x')).toBeUndefined());
   it('set/get round-trips primitives', () => { s.set('n', 42); expect(s.get('n')).toBe(42); });
   it('set/get round-trips objects', () => {
@@ -60,13 +52,13 @@ describe('MemoryStore', () => {
 // ===========================================================================
 
 describe('LocalStore', () => {
-  let s: LocalStore;
+  let s: IStore;
   beforeEach(() => {
     localStorage.clear();
-    s = new LocalStore();
+    s = LocalStore;
   });
 
-  it('is available in JSDOM', () => expect(s.isAvailable).toBe(true));
+  it('is available in JSDOM', () => expect(s.isAvailable()).toBe(true));
   it('set/get round-trips a string', () => {
     s.set('k', 'hello');
     expect(s.get('k')).toBe('hello');
@@ -95,13 +87,13 @@ describe('LocalStore', () => {
 // ===========================================================================
 
 describe('SessionStore', () => {
-  let s: SessionStore;
+  let s: IStore;
   beforeEach(() => {
     sessionStorage.clear();
-    s = new SessionStore();
+    s = SessionStore;
   });
 
-  it('is available in JSDOM', () => expect(s.isAvailable).toBe(true));
+  it('is available in JSDOM', () => expect(s.isAvailable()).toBe(true));
   it('set/get round-trips', () => {
     s.set('k', 99);
     expect(s.get('k')).toBe(99);
@@ -121,31 +113,31 @@ describe('CookieStore', () => {
   beforeEach(() => resetRootDomainCache());
 
   it('is available when document exists', () => {
-    const s = new CookieStore({ crossSubdomain: false });
-    expect(s.isAvailable).toBe(true);
+    const s = CookieStore;
+    expect(s.isAvailable()).toBe(true);
   });
 
   it('set/get round-trips a string value', () => {
-    const s = new CookieStore({ crossSubdomain: false });
+    const s = CookieStore;
     s.set('wince_k', 'hello');
     expect(s.get('wince_k')).toBe('hello');
   });
 
   it('set/get round-trips an object', () => {
-    const s = new CookieStore({ crossSubdomain: false });
+    const s = CookieStore;
     s.set('wince_obj', { a: 1 });
     expect(s.get('wince_obj')).toEqual({ a: 1 });
   });
 
   it('delete removes the entry', () => {
-    const s = new CookieStore({ crossSubdomain: false });
+    const s = CookieStore;
     s.set('wince_del', 'x');
     s.delete('wince_del');
     expect(s.get('wince_del')).toBeUndefined();
   });
 
   it('get returns undefined for missing key', () => {
-    const s = new CookieStore({ crossSubdomain: false });
+    const s = CookieStore;
     expect(s.get('__nonexistent__')).toBeUndefined();
   });
 });
@@ -155,19 +147,22 @@ describe('CookieStore', () => {
 // ===========================================================================
 
 describe('createStore', () => {
-  it('returns a LocalStore when localStorage is available', () => {
-    const s = createStore({ strategies: ['localStorage', 'memory'] });
-    expect(s).toBeInstanceOf(LocalStore);
+  it('returns a working store when localStorage is available', () => {
+    const s = createMultiStore({ strategies: ['localStorage', 'memory'] });
+    s.set('test_key', 'test_value');
+    expect(s.get('test_key')).toBe('test_value');
+    expect(s.isAvailable()).toBe(true);
   });
 
   it('falls back to MemoryStore when no strategy is available', () => {
-    // Pass an empty strategies list (edge case)
-    const s = createStore({ strategies: [] });
-    expect(s).toBeInstanceOf(MemoryStore);
+    const s = createMultiStore({ strategies: [] });
+    s.set('test_key', 'test_value');
+    expect(s.get('test_key')).toBe('test_value');
+    expect(s.isAvailable()).toBe(true);
   });
 
   it('returned store can set/get values', () => {
-    const s = createStore();
+    const s = createMultiStore({ strategies: ['memory'] });
     s.set('test_key', 'test_value');
     expect(s.get('test_key')).toBe('test_value');
     s.delete('test_key');
@@ -298,13 +293,9 @@ describe('DurableQueue', () => {
   });
 
   it('MAX_QUEUE cap: evicts oldest entries when queue overflows', async () => {
-    // Use a private constructor trick to set a tiny cap:
-    // Instead, enqueue 2001 events and verify the queue is capped at 2000.
-    // This exercises the overflow eviction path.
     const QUEUE_SIZE = 2000;
     const OVERFLOW   = 5;
 
-    // Enqueue QUEUE_SIZE + OVERFLOW events sequentially (await each to ensure order)
     for (let i = 0; i < QUEUE_SIZE + OVERFLOW; i++) {
       queue.enqueue({ eid: `overflow-${i}`, payload: JSON.stringify({ i }), enqueuedAt: i });
     }

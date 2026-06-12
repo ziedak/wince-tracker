@@ -25,6 +25,7 @@ export function mountExitIntent(tracker: WinceClient): () => void {
 
     tracker.track('$exit_intent', {
       page: typeof location !== 'undefined' ? location.pathname : undefined,
+      $plugin_source: 'exitIntent',
     });
   };
 

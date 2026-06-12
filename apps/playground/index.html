@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Playground</title>
+    <base href="/" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <wince-root>
+      <div class="playground-shell">
+        <header class="hero">
+          <div>
+            <p class="eyebrow">Wince tracker playground</p>
+            <h1>Cart recovery event lab</h1>
+            <p class="lede">
+              A manual harness for page views, clicks, form abandonment, cart actions,
+              error capture, consent gating, and native browser events.
+            </p>
+          </div>
+          <aside class="status-panel">
+            <div>
+              <span>Consent</span>
+              <strong data-role="consent-state">Pending</strong>
+            </div>
+            <div>
+              <span>Tracker</span>
+              <strong data-role="tracker-state">Ready</strong>
+            </div>
+          </aside>
+        </header>
+
+        <main class="layout">
+          <section class="surface panel">
+            <div class="section-head">
+              <h2>Storefront harness</h2>
+              <p>Use the controls below to simulate the browsing flow of an ecommerce shop.</p>
+            </div>
+
+            <div class="product-grid">
+              <article class="product-card" data-track="product-card">
+                <span class="badge">Featured</span>
+                <h3>Recovery kit</h3>
+                <p>Trigger cart add / remove / checkout sequences without leaving the page.</p>
+                <div class="actions">
+                  <button type="button" data-action="add" data-track-label="Add recovery kit">Add to cart</button>
+                  <button type="button" data-action="remove" data-track-label="Remove recovery kit">Remove</button>
+                </div>
+              </article>
+
+              <article class="product-card" data-track="checkout-card">
+                <span class="badge muted">Checkout</span>
+                <h3>Checkout handoff</h3>
+                <p>Generate purchase intent and a synthetic failure to test error correlation.</p>
+                <div class="actions">
+                  <button type="button" data-action="checkout-start" data-track-label="Start checkout">Start checkout</button>
+                  <button type="button" data-action="checkout-complete" data-track-label="Complete checkout">Complete checkout</button>
+                </div>
+              </article>
+            </div>
+
+            <form id="lead-form" class="form-card" data-track="lead-form">
+              <div class="section-head compact">
+                <h3>Capture form</h3>
+                <p>Leave it partially filled, then navigate away to exercise abandonment capture.</p>
+              </div>
+              <label>
+                Email
+                <input name="email" type="email" placeholder="buyer@example.com" autocomplete="email" />
+              </label>
+              <label>
+                Company
+                <input name="name" type="text" placeholder="Store owner" autocomplete="name" />
+              </label>
+              <label>
+                Phone
+                <input name="tel" type="tel" placeholder="+1 555 0100" autocomplete="tel" />
+              </label>
+              <label>
+                Notes
+                <textarea name="notes" placeholder="Add context for the session"></textarea>
+              </label>
+              <div class="actions">
+                <button type="submit" data-track-label="Submit lead form">Submit form</button>
+                <button type="button" data-role="clear-form">Reset form</button>
+              </div>
+            </form>
+
+            <form class="form-card" data-role="cart-context">
+              <div class="section-head compact">
+                <h3>Cart context</h3>
+                <p>Change the payload the cart plugin receives before you trigger add or checkout actions.</p>
+              </div>
+              <div class="native-grid cart-grid">
+                <label>
+                  Product ID
+                  <input name="product_id" type="text" value="SKU-RECOVERY-01" />
+                </label>
+                <label>
+                  Variant ID
+                  <input name="variant_id" type="text" value="variant-default" />
+                </label>
+                <label>
+                  Cart ID
+                  <input name="cart_id" type="text" value="CART-PLAYGROUND-01" />
+                </label>
+                <label>
+                  Currency
+                  <input name="currency" type="text" value="USD" maxlength="3" />
+                </label>
+                <label>
+                  Quantity
+                  <input name="quantity" type="number" min="1" step="1" value="1" />
+                </label>
+                <label>
+                  Price
+                  <input name="price" type="number" min="0" step="0.01" value="49.99" />
+                </label>
+              </div>
+            </form>
+
+            <section class="control-row panel inset">
+              <button type="button" data-role="track-page-view">Track page view</button>
+              <button type="button" data-role="track-custom">Track custom event</button>
+              <button type="button" data-role="raise-error">Raise error</button>
+              <button type="button" data-role="opt-in">Consent opt-in</button>
+              <button type="button" data-role="opt-out">Consent opt-out</button>
+            </section>
+
+            <section class="native-panel panel inset" data-role="native-surface">
+              <div class="section-head compact">
+                <h3>Native event lab</h3>
+                <p>Exercise non-ecommerce browser events inside the harness: typing, focus, pointer, submit, and scroll.</p>
+              </div>
+
+              <div class="native-grid">
+                <label>
+                  Search input
+                  <input name="native-search" type="search" placeholder="Type, focus, and clear" autocomplete="off" />
+                </label>
+
+                <label>
+                  Segment
+                  <select name="native-segment">
+                    <option>Anonymous</option>
+                    <option>Returning buyer</option>
+                    <option>High intent</option>
+                  </select>
+                </label>
+
+                <label class="checkbox-row">
+                  <input name="native-consent" type="checkbox" />
+                  Accept tracking updates
+                </label>
+
+                <label class="native-textarea">
+                  Notes
+                  <textarea name="native-notes" rows="3" placeholder="Scroll, type, and blur this field"></textarea>
+                </label>
+              </div>
+
+              <div class="native-scroller" data-role="native-scroller" tabindex="0">
+                <div class="native-scroller-inner">
+                  <button type="button">Pointer me</button>
+                  <button type="button">Pointer me too</button>
+                  <p>
+                    Scroll this area to generate native scroll activity. It is intentionally noisy so you can
+                    verify the playground is recording browser-level interactions, not just ecommerce-specific events.
+                  </p>
+                  <p>
+                    Focus the input, type text, toggle the checkbox, and change the select value to see each event
+                    land in the log with the event name and target summary.
+                  </p>
+                  <div class="native-chip-row">
+                    <span class="chip">focusin</span>
+                    <span class="chip">input</span>
+                    <span class="chip">change</span>
+                    <span class="chip">pointerdown</span>
+                    <span class="chip">scroll</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </section>
+
+          <aside class="panel log-panel">
+            <section class="feed-section">
+              <div class="section-head compact">
+                <h2>Diagnostics</h2>
+                <p>Live runtime snapshot from the tracker client.</p>
+              </div>
+              <div class="diagnostics-grid">
+                <article class="diag-card">
+                  <span>Queued</span>
+                  <strong data-role="diag-events-queued">—</strong>
+                </article>
+                <article class="diag-card">
+                  <span>Sent</span>
+                  <strong data-role="diag-events-sent">—</strong>
+                </article>
+                <article class="diag-card">
+                  <span>Dropped</span>
+                  <strong data-role="diag-events-dropped">—</strong>
+                </article>
+                <article class="diag-card">
+                  <span>Circuit</span>
+                  <strong data-role="diag-circuit-open">—</strong>
+                </article>
+                <article class="diag-card wide">
+                  <span>Session</span>
+                  <strong data-role="diag-session-id">—</strong>
+                </article>
+                <article class="diag-card wide">
+                  <span>Anon</span>
+                  <strong data-role="diag-anon-id">—</strong>
+                </article>
+                <article class="diag-card wide">
+                  <span>Window</span>
+                  <strong data-role="diag-window-id">—</strong>
+                </article>
+                <article class="diag-card">
+                  <span>IDB queue</span>
+                  <strong data-role="diag-idb-queue-size">—</strong>
+                </article>
+                <article class="diag-card wide">
+                  <span>DNT signal</span>
+                  <strong data-role="diag-dnt">—</strong>
+                </article>
+              </div>
+              <pre class="diag-reasons" data-role="diag-dropped-reasons">{}</pre>
+            </section>
+
+            <section class="feed-section">
+              <div class="section-head compact">
+                <h2>Event queue</h2>
+                <p>Events seen by <code>beforeTrack</code> — <span class="badge-inline queued">⏳ queued</span> = in buffer, <span class="badge-inline flushed">✅ flushed</span> = delivered to transport.</p>
+              </div>
+              <div class="queue-log" data-role="queue-log"></div>
+            </section>
+
+            <section class="feed-section">
+                <p>Shows what the tracker plugins intercepted before delivery.</p>
+              </div>
+              <div class="intercept-log" data-role="intercept-log"></div>
+            </section>
+
+            <section class="feed-section">
+              <div class="section-head compact">
+                <h2>Runtime log</h2>
+                <p>Last harness action and transport activity appear here.</p>
+              </div>
+              <div class="log" data-role="log"></div>
+            </section>
+
+            <section class="feed-section">
+              <div class="section-head compact">
+                <h2>Transport batches</h2>
+                <p>What the browser actually prepared for delivery.</p>
+              </div>
+              <div class="transport-log" data-role="transport-log"></div>
+            </section>
+          </aside>
+        </main>
+      </div>
+    </wince-root>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

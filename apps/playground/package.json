@@ -1,0 +1,10 @@
+{
+  "name": "@wince/playground",
+  "version": "0.0.1",
+  "private": true,
+   "dependencies": {
+    "@wince/consent": "workspace:*",
+    "@wince/web": "workspace:*",
+    "@wince/core": "workspace:*"
+  }
+}

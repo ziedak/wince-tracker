@@ -67,3 +67,5 @@ opencode.json
 sandbox/vendor/
 sandbox/vendor/
 .agents/skills/
+
+vite.config.*.timestamp*

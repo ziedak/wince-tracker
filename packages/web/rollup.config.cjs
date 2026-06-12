@@ -41,6 +41,21 @@ const aliasPlugin = (() => {
       }
       const srcIndex = path.join(pkgDir, 'src', 'index.ts');
       if (fs.existsSync(srcIndex)) {
+        // Register sub-path aliases declared in the package's exports field.
+        // Only files that exist in src/ AND are named in exports are wired up,
+        // so internal files (utils.ts, DurableQueue.ts, etc.) are not exposed.
+        try {
+          const pkgJson = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf-8'));
+          const exportKeys = Object.keys(pkgJson.exports ?? {});
+          for (const key of exportKeys) {
+            if (key === '.' || key === './package.json') continue;
+            const subName = key.replace(/^\.\//, '');
+            const srcFile = path.join(pkgDir, 'src', `${subName}.ts`);
+            if (fs.existsSync(srcFile)) {
+              entries.push({ find: `@wince/${name}/${subName}`, replacement: srcFile });
+            }
+          }
+        } catch { /* ignore — package.json not readable */ }
         entries.push({ find: `@wince/${name}`, replacement: srcIndex });
       }
     }

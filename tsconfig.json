@@ -29,6 +29,12 @@
     },
     {
       "path": "./packages/cache"
+    },
+    {
+      "path": "./apps/playground-e2e"
+    },
+    {
+      "path": "./apps/playground"
     }
   ]
 }

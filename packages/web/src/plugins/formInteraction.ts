@@ -75,6 +75,7 @@ export function mountFormInteraction(
         form_action: form?.getAttribute('action') || undefined,
         field_name:  fieldKey(input),
         field_type:  input.type || 'text',
+        $plugin_source: 'formInteraction',
       });
     }
 
@@ -83,6 +84,7 @@ export function mountFormInteraction(
       tracker.track('$form_field_focused', {
         field_name: fieldKey(input),
         field_type: input.type || 'text',
+        $plugin_source: 'formInteraction',
       });
     }
   }
@@ -98,6 +100,7 @@ export function mountFormInteraction(
       const props: Record<string, unknown> = {
         field_name: fieldKey(input),
         field_type: input.type || 'text',
+        $plugin_source: 'formInteraction',
       };
       if (entered) props['dwell_ms'] = Date.now() - entered;
       tracker.track('$form_field_blurred', props);

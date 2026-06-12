@@ -55,7 +55,7 @@ export function mountCart(tracker: WinceClient): () => void {
     if (!detail || typeof detail !== 'object') return;
     const { action, ...rest } = detail;
     if (!KNOWN_ACTIONS.has(action)) return;
-    tracker.track(`$cart_${action}`, rest);
+    tracker.track(`$cart_${action}`, { ...rest, $plugin_source: 'cart' });
   };
 
   document.addEventListener('wince:cart', handler);
