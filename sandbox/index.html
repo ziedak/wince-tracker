@@ -1,66 +1,532 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Wince SDK Sandbox</title>
-    <style>
-      *, *::before, *::after { box-sizing: border-box; }
-      body   { font-family: Inter, system-ui, Arial, sans-serif; padding: 24px; line-height: 1.5; max-width: 780px; margin: 0 auto; }
-      h1     { margin-top: 0; }
-      .row   { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
-      button { padding: 8px 16px; border: 1px solid #d0d7de; border-radius: 6px; cursor: pointer; background: #f6f8fa; font-size: 14px; }
-      button:hover { background: #eaf0f6; }
-      button.danger { border-color: #cf222e; color: #cf222e; }
-      button.primary { background: #0969da; color: #fff; border-color: #0969da; }
-      button.primary:hover { background: #0750a2; }
-      #log   { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 12px; font-family: monospace; font-size: 12px; max-height: 420px; overflow-y: auto; }
-      .entry { border-bottom: 1px solid #eaeef2; padding: 4px 0; white-space: pre-wrap; word-break: break-all; }
-      .entry:last-child { border-bottom: none; }
-      .ts    { color: #6e7781; margin-right: 8px; }
-      .ok    { color: #1a7f37; }
-      .err   { color: #cf222e; }
-      .info  { color: #0969da; }
-      label  { font-size: 14px; }
-      input  { padding: 6px 10px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; width: 220px; }
-    </style>
+    <meta charset="UTF-8" />
+    <link rel="shortcut icon" href="#" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite + TS</title>
+    <script src="./vendor/index.umd.js"></script>
   </head>
   <body>
-    <h1>Wince SDK Sandbox</h1>
-    <p>
-      Uses <strong>WinceLite</strong> (no auto-plugins) from <code>vendor/index.lite.umd.js</code>.
-      All requests go to <strong>httpbin.org/post</strong> — check the Network tab to inspect payloads.
-    </p>
-
-    <div class="row">
-      <button class="primary" id="btn-page">page()</button>
-      <button id="btn-track-cart">track add_to_cart</button>
-      <button id="btn-track-checkout">track checkout_start</button>
-    </div>
-    <div class="row">
-      <label>User ID: <input id="uid" placeholder="user_abc" value="user_abc" /></label>
-      <button id="btn-identify">identify()</button>
-      <button id="btn-reset" class="danger">reset()</button>
-    </div>
-    <div class="row">
-      <button id="btn-optin">optIn()</button>
-      <button id="btn-optout" class="danger">optOut()</button>
-      <button id="btn-flush">flush()</button>
-    </div>
-
     <h3>Event log</h3>
-    <div id="log"><div class="entry info"><span class="ts">--</span>Waiting for SDK…</div></div>
+    <div id="log">
+      <div class="entry info"><span class="ts">--</span>Waiting for SDK…</div>
+    </div>
+    <div id="app">
+      <h1>Tracker Test Page</h1>
+      <button id="test-btn" class="trackable">Click Me</button>
+      <input
+        id="test-input"
+        class="trackable"
+        type="text"
+        placeholder="Type here..."
+      />
+      <input id="test-checkbox" class="trackable" type="checkbox" /> Checkbox
+      <input
+        id="test-radio1"
+        class="trackable"
+        type="radio"
+        name="test-radio"
+        value="1"
+      />
+      Radio 1
+      <input
+        id="test-radio2"
+        class="trackable"
+        type="radio"
+        name="test-radio"
+        value="2"
+      />
+      Radio 2
+      <select id="test-select" class="trackable">
+        <option value="">Select...</option>
+        <option value="a">Option A</option>
+        <option value="b">Option B</option>
+      </select>
+      <textarea
+        id="test-textarea"
+        class="trackable"
+        placeholder="Type more..."
+      ></textarea>
+      <form id="test-form" class="trackable">
+        <input name="email" type="email" placeholder="Email" />
+        <input name="password" type="password" placeholder="Password" />
+        <input name="age" type="number" placeholder="Age" />
+        <button type="submit">Submit</button>
+      </form>
+      <p id="test-p" class="trackable">
+        This is a paragraph. Try selecting or copying this text.
+      </p>
+      <div
+        id="test-div"
+        class="trackable"
+        style="width: 200px; height: 100px; background: #eee; margin-top: 20px"
+      >
+        Hover and move mouse here
+      </div>
 
-    <!-- Lite bundle (no auto-plugins) copied into vendor/ by the rollup build -->
-    <script src="./vendor/index.umd.js"></script>
+      <!-- Advanced: Scrollable div for high-frequency scroll event testing -->
+      <div
+        id="scrollable-div"
+        class="trackable"
+        style="
+          width: 400px;
+          height: 150px;
+          overflow: auto;
+          border: 2px solid #888;
+          margin-top: 32px;
+          background: #fafafa;
+        "
+      >
+        <div
+          style="
+            height: 600px;
+            width: 100%;
+            background: linear-gradient(180deg, #e0e0e0 0%, #b0b0b0 100%);
+          "
+        >
+          <h2 style="margin: 0; padding: 8px">Scrollable Div</h2>
+          <p style="padding: 8px">
+            Scroll inside this box to test scroll event tracking on non-viewport
+            elements. This simulates chat windows, code editors, or dashboards
+            with virtual scrolling.
+          </p>
+          <ul style="padding: 8px">
+            <li>Item 1</li>
+            <li>Item 2</li>
+            <li>Item 3</li>
+            <li>Item 4</li>
+            <li>Item 5</li>
+            <li>Item 6</li>
+            <li>Item 7</li>
+            <li>Item 8</li>
+            <li>Item 9</li>
+            <li>Item 10</li>
+          </ul>
+        </div>
+      </div>
 
+      <!-- Advanced: Virtualized List (simulates infinite scroll, high-frequency updates) -->
+      <div
+        id="virtual-list-container"
+        class="trackable"
+        style="
+          width: 400px;
+          height: 200px;
+          overflow-y: auto;
+          border: 2px solid #4a90e2;
+          margin-top: 32px;
+          background: #f0f8ff;
+        "
+      >
+        <h2 style="margin: 0; padding: 8px; background: #e6f2ff">
+          Virtualized List
+        </h2>
+        <div id="virtual-list" style="position: relative; height: 2000px">
+          <!-- List items will be rendered by JS for virtualization simulation -->
+        </div>
+      </div>
+
+      <!-- Advanced: Drag-and-Drop Area -->
+      <div
+        id="drag-drop-area"
+        class="trackable"
+        style="
+          width: 400px;
+          height: 120px;
+          border: 2px dashed #e67e22;
+          margin-top: 32px;
+          background: #fffbe6;
+          display: flex;
+          align-items: center;
+          justify-content: space-around;
+        "
+      >
+        <div
+          id="draggable-1"
+          class="trackable"
+          draggable="true"
+          style="
+            width: 80px;
+            height: 80px;
+            background: #f5b041;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: grab;
+          "
+        >
+          Drag 1
+        </div>
+        <div
+          id="draggable-2"
+          class="trackable"
+          draggable="true"
+          style="
+            width: 80px;
+            height: 80px;
+            background: #85c1e9;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: grab;
+          "
+        >
+          Drag 2
+        </div>
+        <div
+          id="drop-target"
+          class="trackable"
+          style="
+            width: 100px;
+            height: 100px;
+            background: #d5f5e3;
+            border: 2px solid #27ae60;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          "
+        >
+          Drop Here
+        </div>
+      </div>
+
+      <!-- Advanced: Dynamic Content Area (simulates chat, notifications, or live feed) -->
+      <div
+        id="dynamic-content"
+        class="trackable"
+        style="
+          width: 400px;
+          min-height: 80px;
+          border: 2px solid #b03a2e;
+          margin-top: 32px;
+          background: #f9ebea;
+          padding: 8px;
+        "
+      >
+        <h2 style="margin: 0; padding: 8px; background: #f5c6cb">
+          Dynamic Content
+        </h2>
+        <button id="add-message" class="trackable" style="margin-bottom: 8px">
+          Add Message
+        </button>
+        <div id="messages"></div>
+      </div>
+
+      <script>
+        // Virtualized List Simulation
+        const virtualList = document.getElementById('virtual-list');
+        if (virtualList) {
+          for (let i = 0; i < 100; i++) {
+            const item = document.createElement('div');
+            item.className = 'trackable';
+            item.style.position = 'absolute';
+            item.style.top = `${i * 20}px`;
+            item.style.left = '0';
+            item.style.width = '100%';
+            item.style.height = '20px';
+            item.style.borderBottom = '1px solid #e0e0e0';
+            item.textContent = `Virtual Item ${i + 1}`;
+            virtualList.appendChild(item);
+          }
+        }
+        // Dynamic Content Simulation
+        const addMsgBtn = document.getElementById('add-message');
+        const messages = document.getElementById('messages');
+        if (addMsgBtn && messages) {
+          addMsgBtn.addEventListener('click', () => {
+            const msg = document.createElement('div');
+            msg.className = 'trackable';
+            msg.textContent = `Message at ${new Date().toLocaleTimeString()}`;
+            messages.appendChild(msg);
+          });
+        }
+      </script>
+    </div>
+
+    <!-- Advanced: Virtualized List Widget -->
+    <div id="virtualized-list-container" style="margin-top: 32px">
+      <h2 style="margin: 0 0 8px 0">Virtualized List (1000 items)</h2>
+      <div
+        id="virtualized-list"
+        class="trackable"
+        style="
+          width: 400px;
+          height: 200px;
+          overflow-y: auto;
+          border: 2px solid #888;
+          background: #f5f5f5;
+          position: relative;
+        "
+        tabindex="0"
+        aria-label="Virtualized List"
+      ></div>
+    </div>
+
+    <!-- Advanced: Drag-and-Drop Widget -->
+    <div id="drag-drop-area" style="margin-top: 32px">
+      <h2 style="margin: 0 0 8px 0">Drag and Drop Area</h2>
+      <div style="display: flex; gap: 24px">
+        <div
+          id="drag-items"
+          style="display: flex; flex-direction: column; gap: 8px"
+        >
+          <div
+            class="draggable trackable"
+            draggable="true"
+            style="
+              padding: 8px;
+              background: #e3f2fd;
+              border: 1px solid #2196f3;
+              cursor: grab;
+            "
+          >
+            Draggable 1
+          </div>
+          <div
+            class="draggable trackable"
+            draggable="true"
+            style="
+              padding: 8px;
+              background: #e3f2fd;
+              border: 1px solid #2196f3;
+              cursor: grab;
+            "
+          >
+            Draggable 2
+          </div>
+          <div
+            class="draggable trackable"
+            draggable="true"
+            style="
+              padding: 8px;
+              background: #e3f2fd;
+              border: 1px solid #2196f3;
+              cursor: grab;
+            "
+          >
+            Draggable 3
+          </div>
+        </div>
+        <div
+          id="drop-zones"
+          style="display: flex; flex-direction: column; gap: 8px"
+        >
+          <div
+            class="dropzone trackable"
+            style="
+              width: 120px;
+              height: 48px;
+              background: #fffde7;
+              border: 2px dashed #fbc02d;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+            "
+          >
+            Drop Zone 1
+          </div>
+          <div
+            class="dropzone trackable"
+            style="
+              width: 120px;
+              height: 48px;
+              background: #fffde7;
+              border: 2px dashed #fbc02d;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+            "
+          >
+            Drop Zone 2
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Advanced: Dynamic Content Area -->
+    <div id="dynamic-content-area" style="margin-top: 32px">
+      <h2 style="margin: 0 0 8px 0">
+        Dynamic Content (High-Frequency DOM Changes)
+      </h2>
+      <button id="start-dynamic" class="trackable">
+        Start Adding/Removing
+      </button>
+      <button id="stop-dynamic" class="trackable">Stop</button>
+      <div
+        id="dynamic-list"
+        class="trackable"
+        style="
+          margin-top: 12px;
+          min-height: 40px;
+          border: 1px solid #bbb;
+          background: #f9fbe7;
+          padding: 8px;
+        "
+      ></div>
+    </div>
+
+    <!-- Advanced: Rapid-Fire Event Button -->
+    <div id="rapid-fire-area" style="margin-top: 32px">
+      <h2 style="margin: 0 0 8px 0">Rapid-Fire Event Button</h2>
+      <button id="rapid-fire-btn" class="trackable">Fire 100 Events</button>
+      <span
+        id="rapid-fire-status"
+        style="margin-left: 12px; color: #388e3c"
+      ></span>
+    </div>
+
+    <!-- Advanced Widgets Script (modular, strict, production-grade) -->
+    <script type="module">
+      // Virtualized List Implementation
+      const VIRTUALIZED_LIST_SIZE = 1000;
+      const VIRTUALIZED_ROW_HEIGHT = 32;
+      const VISIBLE_ROWS = 7;
+      const virtualizedList = document.getElementById('virtualized-list');
+      if (virtualizedList) {
+        const containerHeight = VISIBLE_ROWS * VIRTUALIZED_ROW_HEIGHT;
+        virtualizedList.style.height = containerHeight + 'px';
+        const totalHeight = VIRTUALIZED_LIST_SIZE * VIRTUALIZED_ROW_HEIGHT;
+        const spacer = document.createElement('div');
+        spacer.style.height = totalHeight + 'px';
+        spacer.style.position = 'relative';
+        virtualizedList.appendChild(spacer);
+        let renderedRows = [];
+        function renderRows(scrollTop) {
+          renderedRows.forEach(function (row) {
+            row.remove();
+          });
+          renderedRows = [];
+          const startIdx = Math.max(
+            0,
+            Math.floor(scrollTop / VIRTUALIZED_ROW_HEIGHT) - 1,
+          );
+          const endIdx = Math.min(
+            VIRTUALIZED_LIST_SIZE,
+            startIdx + VISIBLE_ROWS + 2,
+          );
+          for (let i = startIdx; i < endIdx; i++) {
+            const row = document.createElement('div');
+            row.className = 'virtualized-row trackable';
+            row.style.position = 'absolute';
+            row.style.left = '0';
+            row.style.right = '0';
+            row.style.height = VIRTUALIZED_ROW_HEIGHT + 'px';
+            row.style.top = i * VIRTUALIZED_ROW_HEIGHT + 'px';
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.padding = '0 12px';
+            row.style.borderBottom = '1px solid #e0e0e0';
+            row.textContent = 'Item #' + (i + 1);
+            spacer.appendChild(row);
+            renderedRows.push(row);
+          }
+        }
+        virtualizedList.addEventListener('scroll', function () {
+          renderRows(virtualizedList.scrollTop);
+        });
+        renderRows(0);
+      }
+
+      // Drag-and-Drop Implementation
+      const draggables = document.querySelectorAll('.draggable');
+      const dropzones = document.querySelectorAll('.dropzone');
+      draggables.forEach(function (draggable) {
+        draggable.addEventListener('dragstart', function (e) {
+          if (e.dataTransfer) {
+            e.dataTransfer.setData('text/plain', draggable.textContent || '');
+          }
+        });
+      });
+      dropzones.forEach(function (dropzone) {
+        dropzone.addEventListener('dragover', function (e) {
+          e.preventDefault();
+          dropzone.style.background = '#ffe082';
+        });
+        dropzone.addEventListener('dragleave', function () {
+          dropzone.style.background = '#fffde7';
+        });
+        dropzone.addEventListener('drop', function (e) {
+          e.preventDefault();
+          var data = e.dataTransfer ? e.dataTransfer.getData('text/plain') : '';
+          dropzone.textContent = 'Dropped: ' + data;
+          dropzone.style.background = '#c8e6c9';
+          setTimeout(function () {
+            dropzone.style.background = '#fffde7';
+            dropzone.textContent = 'Drop Zone';
+          }, 1200);
+        });
+      });
+
+      // Dynamic Content Area Implementation
+      var dynamicInterval;
+      const dynamicList = document.getElementById('dynamic-list');
+      const startDynamic = document.getElementById('start-dynamic');
+      const stopDynamic = document.getElementById('stop-dynamic');
+      let dynamicCount = 0;
+      if (startDynamic && stopDynamic && dynamicList) {
+        startDynamic.addEventListener('click', function () {
+          if (dynamicInterval) return;
+          dynamicInterval = window.setInterval(function () {
+            // Add or remove elements at high frequency
+            if (dynamicList.childElementCount < 20) {
+              const el = document.createElement('div');
+              el.className = 'dynamic-item trackable';
+              el.textContent = 'Dynamic Item #' + ++dynamicCount;
+              el.style.padding = '4px 8px';
+              el.style.margin = '2px 0';
+              el.style.background = '#e8f5e9';
+              el.style.border = '1px solid #81c784';
+              dynamicList.appendChild(el);
+            } else {
+              if (dynamicList.firstElementChild) {
+                dynamicList.removeChild(dynamicList.firstElementChild);
+              }
+            }
+          }, 60); // ~16 ops/sec
+        });
+        stopDynamic.addEventListener('click', function () {
+          if (dynamicInterval) {
+            clearInterval(dynamicInterval);
+            dynamicInterval = undefined;
+          }
+        });
+      }
+
+      // Rapid-Fire Event Button Implementation
+      const rapidFireBtn = document.getElementById('rapid-fire-btn');
+      const rapidFireStatus = document.getElementById('rapid-fire-status');
+      if (rapidFireBtn && rapidFireStatus) {
+        rapidFireBtn.addEventListener('click', function () {
+          let count = 0;
+          rapidFireStatus.textContent = 'Firing...';
+          for (let i = 0; i < 100; i++) {
+            setTimeout(function () {
+              rapidFireBtn.dispatchEvent(
+                new Event('rapidfire', { bubbles: true }),
+              );
+              count++;
+              if (count === 100) {
+                rapidFireStatus.textContent = '100 events fired!';
+                setTimeout(function () {
+                  rapidFireStatus.textContent = '';
+                }, 2000);
+              }
+            }, i * 5);
+          }
+        });
+      }
+    </script>
     <script>
       (function () {
         const log = document.getElementById('log');
 
         function append(text, cls) {
-          const ts   = new Date().toISOString().slice(11, 23);
-          const div  = document.createElement('div');
+          const ts = new Date().toISOString().slice(11, 23);
+          const div = document.createElement('div');
           div.className = 'entry ' + (cls || '');
           div.innerHTML = '<span class="ts">' + ts + '</span>' + escHtml(text);
           log.appendChild(div);
@@ -88,80 +554,40 @@
             }
           } catch (_) {}
           append('→ POST ' + url + '\n' + bodyPreview, 'ok');
-          return _origFetch(url, init).then(function (res) {
-            append('← ' + res.status + ' ' + res.url, res.ok ? 'ok' : 'err');
-            return res;
-          }).catch(function (err) {
-            append('← ERROR: ' + err.message, 'err');
-            throw err;
-          });
+          return _origFetch(url, init)
+            .then(function (res) {
+              append('← ' + res.status + ' ' + res.url, res.ok ? 'ok' : 'err');
+              return res;
+            })
+            .catch(function (err) {
+              append('← ERROR: ' + err.message, 'err');
+              throw err;
+            });
         };
 
         // ----------------------------------------------------------------
         // Init SDK (starts paused — consent not yet granted)
         // ----------------------------------------------------------------
-        const W = window.WinceLite;
+        const W = window.Wince;
         if (!W) {
-          append('WinceLite not found — run `pnpm nx run @wince/web:build` first', 'err');
+          append(
+            'Wince not found — run `pnpm nx run @wince/web:build` first',
+            'err',
+          );
           return;
         }
 
         const tracker = W.init({
-          endpoint:       'https://httpbin.org/post',
-          compress:       false,   // readable JSON in Network tab
-          batchSize:      5,
+          endpoint: 'https://httpbin.org/post',
+          compress: false, // readable JSON in Network tab
+          batchSize: 5,
           batchTimeoutMs: 1500,
-          consent:        null,    // disable consent gating for the sandbox
-          fetch:          interceptFetch,
+          consent: null, // disable consent gating for the sandbox
+          fetch: interceptFetch,
         });
-mountPageView(tracker,{});
+        W.mountClick(tracker);
+        W.mountPageView(tracker,{});
         append('SDK initialised — consent gating disabled for sandbox', 'info');
-
-        // ----------------------------------------------------------------
-        // Button handlers
-        // ----------------------------------------------------------------
-        document.getElementById('btn-page').onclick = function () {
-          tracker.page();
-          append('page() called', 'info');
-        };
-
-        document.getElementById('btn-track-cart').onclick = function () {
-          tracker.track('add_to_cart', { product_id: 'SKU-001', price: 49.99, quantity: 1, currency: 'USD' });
-          append('track(add_to_cart) queued', 'info');
-        };
-
-        document.getElementById('btn-track-checkout').onclick = function () {
-          tracker.track('checkout_start', { cart_total: 149.97, currency: 'USD' });
-          append('track(checkout_start) queued', 'info');
-        };
-
-        document.getElementById('btn-identify').onclick = function () {
-          const uid = document.getElementById('uid').value.trim();
-          if (!uid) { append('Enter a user ID first', 'err'); return; }
-          tracker.identify(uid);
-          append('identify("' + uid + '")', 'info');
-        };
-
-        document.getElementById('btn-reset').onclick = function () {
-          tracker.reset();
-          append('reset() — new session + anonymous ID', 'info');
-        };
-
-        document.getElementById('btn-optin').onclick = function () {
-          tracker.optIn();
-          append('optIn()', 'info');
-        };
-
-        document.getElementById('btn-optout').onclick = function () {
-          tracker.optOut();
-          append('optOut() — transport paused', 'info');
-        };
-
-        document.getElementById('btn-flush').onclick = async function () {
-          append('flush() …', 'info');
-          await tracker.flush();
-          append('flush() complete', 'ok');
-        };
       })();
     </script>
   </body>

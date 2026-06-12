@@ -91,6 +91,7 @@ describe('SessionManager', () => {
   it('startedAt reflects session creation time', () => {
     const now = Date.now();
     const mgr = new SessionManager();
+    mgr.getSid(); // trigger session start
     expect(mgr.startedAt).toBeGreaterThanOrEqual(now);
     expect(mgr.startedAt).toBeLessThanOrEqual(Date.now());
   });

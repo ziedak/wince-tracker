@@ -216,7 +216,7 @@ export function sanitizeClick(event: MouseEvent): ClickData | null {
   if (isExcludedInput(el)) return null;
 
   const tag     = el.tagName.toLowerCase();
-  const rawText = (el as HTMLElement).innerText?.trim() ?? '';
+  const rawText = ((el as HTMLElement).innerText || (el as HTMLElement).textContent || '').trim();
   const text    = rawText.slice(0, TEXT_MAX_LEN);
   const href    = (el as HTMLAnchorElement).href || undefined;
   const trackId = el.getAttribute('data-track') || undefined;

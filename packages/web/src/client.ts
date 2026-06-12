@@ -295,7 +295,7 @@ export class WinceClient extends BaseClient {
     props?: Record<string, unknown>,
     personProps?: PersonProps,
   ): void {
-    console.debug('[Wince] track', name, props, personProps);
+    //console.debug('[Wince] track', name, props, personProps);
     if (this._consent !== null && !this._consent.isGranted()) {
       this._drop('consent');
       return;
@@ -411,6 +411,7 @@ export class WinceClient extends BaseClient {
   async close(): Promise<void> {
     this._unsubConsent?.();
     this._removeListeners?.();
+    this._session.destroy();
     await this._transport.close();
   }
 

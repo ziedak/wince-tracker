@@ -78,6 +78,9 @@
     "packages/storage": {
       "name": "@wince/storage",
       "version": "0.0.1",
+      "dependencies": {
+        "@wince/utils": "workspace:*",
+      },
     },
     "packages/transport": {
       "name": "@wince/transport",

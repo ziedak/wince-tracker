@@ -61,12 +61,14 @@ export class SessionManager {
   private _store?: MinimalStore;
   private _state: SessionState | null = null;
   private _lastSavedAt = 0;
+  private _removeStorageListener?: () => void;
 
   constructor(opts: SessionManagerOptions = {}) {
     this._idleTimeoutMs = opts.idleTimeoutMs ?? DEFAULT_IDLE_MS;
     this._maxDurationMs = opts.maxDurationMs ?? DEFAULT_MAX_DUR_MS;
     this._store         = opts.store;
     this._load();
+    this._attachStorageListener();
   }
 
   /** Returns the current session ID, starting a new session if the previous one has expired. */
@@ -105,10 +107,12 @@ export class SessionManager {
     this._startNew(Date.now());
   }
 
-  /** Unix ms when the current session started (starts a new session if expired). */
+  /**
+   * Unix ms when the current session started.
+   * Returns 0 if no session has been started yet. Does NOT trigger a rotation.
+   */
   get startedAt(): number {
-    this._ensureActive();
-    return this._state!.startedAt;
+    return this._state?.startedAt ?? 0;
   }
 
   // --------------------------------------------------------------------------
@@ -118,11 +122,11 @@ export class SessionManager {
     if (this._isExpired(now)) this._startNew(now);
   }
 
-  private _isExpired(now: number): boolean {
-    if (!this._state) return true;
+  private _isExpired(now: number, state = this._state): boolean {
+    if (!state) return true;
     return (
-      now - this._state.lastActiveAt > this._idleTimeoutMs ||
-      now - this._state.startedAt    > this._maxDurationMs
+      now - state.lastActiveAt > this._idleTimeoutMs ||
+      now - state.startedAt    > this._maxDurationMs
     );
   }
 
@@ -136,7 +140,14 @@ export class SessionManager {
     if (!raw) return;
     try {
       const parsed: unknown = JSON.parse(raw);
-      if (isSessionState(parsed)) this._state = parsed;
+      if (isSessionState(parsed)) {
+        if (this._isExpired(Date.now(), parsed)) {
+          // Stale session — discard it and clean up storage immediately.
+          this._store?.delete?.(SESSION_KEY);
+        } else {
+          this._state = parsed;
+        }
+      }
     } catch { /* corrupted data — ignore, start fresh */ }
   }
 
@@ -150,11 +161,19 @@ export class SessionManager {
       store.set(SESSION_KEY, JSON.stringify(this._state));
       this._lastSavedAt = Date.now();
     }
+    this._attachStorageListener();
   }
 
+  /** Remove the cross-tab storage listener. Call when the client is closed. */
+  destroy(): void {
+    this._removeStorageListener?.();
+  }
+
+  // --------------------------------------------------------------------------
+
   private _save(now = Date.now()): void {
-    if (!this._state) return;
-    if (this._store?.refreshKey) {
+    if (!this._state || !this._store) return;
+    if (this._store.refreshKey) {
       // Atomic read–modify–write: only update `lastActiveAt` if the stored
       // session still belongs to us (prevents cross-tab overwrites from
       // clobbering a newer session started by another tab).
@@ -172,8 +191,37 @@ export class SessionManager {
         return JSON.stringify(state);
       });
     } else {
-      this._store?.set(SESSION_KEY, JSON.stringify(this._state));
+      this._store.set(SESSION_KEY, JSON.stringify(this._state));
     }
     this._lastSavedAt = now;
+  }
+
+  /**
+   * Listen for SESSION_KEY writes by other tabs and adopt the newer session
+   * state. Keeps all open tabs on the same sid without any extra round-trips.
+   */
+  private _attachStorageListener(): void {
+    if (typeof window === 'undefined') return;
+    // Remove any existing listener before (re)attaching (e.g. after migrateToStore).
+    this._removeStorageListener?.();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== SESSION_KEY || e.newValue === null) return;
+      try {
+        const parsed: unknown = JSON.parse(e.newValue);
+        if (!isSessionState(parsed)) return;
+        const now = Date.now();
+        // Adopt only when the remote session is not expired AND was started after
+        // ours — meaning another tab did a reset or started a fresh session.
+        if (
+          !this._isExpired(now, parsed) &&
+          (!this._state || parsed.startedAt > this._state.startedAt)
+        ) {
+          this._state = parsed;
+        }
+      } catch { /* ignore malformed storage writes */ }
+    };
+    window.addEventListener('storage', onStorage);
+    this._removeStorageListener = () =>
+      window.removeEventListener('storage', onStorage);
   }
 }
