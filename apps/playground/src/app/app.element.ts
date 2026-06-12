@@ -7,9 +7,14 @@ import {
   init,
   mountCart,
   mountClick,
+  mountCopyPaste,
+  mountDeadClick,
   mountErrorCapture,
+  mountExitIntent,
   mountFormAbandon,
+  mountFormInteraction,
   mountPageView,
+  mountRageClick,
 } from '@wince/web';
 
 type LogLevel = 'info' | 'event' | 'state' | 'error';
@@ -90,7 +95,9 @@ async function readBodyText(body: RequestInit['body']): Promise<string> {
   if (body instanceof Blob) return body.text();
   if (body instanceof ArrayBuffer) return new TextDecoder().decode(body);
   if (ArrayBuffer.isView(body)) {
-    return new TextDecoder().decode(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength));
+    return new TextDecoder().decode(
+      body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+    );
   }
   if (typeof FormData !== 'undefined' && body instanceof FormData) {
     return JSON.stringify(Array.from(body.entries()));
@@ -98,7 +105,9 @@ async function readBodyText(body: RequestInit['body']): Promise<string> {
   return String(body);
 }
 
-function parseTransportBatch(raw: string): { sentAt?: number; eventNames: string[] } | null {
+function parseTransportBatch(
+  raw: string,
+): { sentAt?: number; eventNames: string[] } | null {
   try {
     const parsed = JSON.parse(raw) as {
       sent_at?: number;
@@ -182,7 +191,11 @@ export class AppElement extends HTMLElement {
       this.scheduleDiagnosticsRefresh();
     },
     beforeTrack: (event) => {
-      this._recordIntercept(describeInterceptSource(event.props?.$plugin_source), event.t, pretty(event.props ?? {}));
+      this._recordIntercept(
+        describeInterceptSource(event.props?.$plugin_source),
+        event.t,
+        pretty(event.props ?? {}),
+      );
       this._record('event', event.t, pretty(event.props ?? {}));
       this._addQueueEntry(event.t, event.props ?? {});
       this.scheduleDiagnosticsRefresh();
@@ -213,19 +226,31 @@ export class AppElement extends HTMLElement {
     const clearForm = this.querySelector('[data-role="clear-form"]');
     const form = this.querySelector('#lead-form');
 
-    const addListener = (target: Element | null, event: string, handler: () => void) => {
+    const addListener = (
+      target: Element | null,
+      event: string,
+      handler: () => void,
+    ) => {
       if (!target) return;
       target.addEventListener(event, handler);
       this._cleanup.push(() => target.removeEventListener(event, handler));
     };
 
     addListener(trackPageView, 'click', () => {
-      this._client.page({ surface: 'playground', section: 'manual', $plugin_source: 'playground.manual' });
+      this._client.page({
+        surface: 'playground',
+        section: 'manual',
+        $plugin_source: 'playground.manual',
+      });
       this._record('state', 'page_view', 'Explicit page view emitted');
     });
 
     addListener(trackCustom, 'click', () => {
-      this._client.track('$custom_probe', { source: 'playground', step: 'manual', $plugin_source: 'playground.manual' });
+      this._client.track('$custom_probe', {
+        source: 'playground',
+        step: 'manual',
+        $plugin_source: 'playground.manual',
+      });
       this._record('state', 'custom', 'Custom event emitted');
     });
 
@@ -235,11 +260,18 @@ export class AppElement extends HTMLElement {
       } catch (error) {
         this._client.track('$error', {
           type: 'manual_probe',
-          message: error instanceof Error ? error.message : 'Playground synthetic error',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Playground synthetic error',
           stack: error instanceof Error ? error.stack : undefined,
           $plugin_source: 'playground.manual',
         });
-        this._record('error', 'synthetic error', 'Tracked synthetic error event');
+        this._record(
+          'error',
+          'synthetic error',
+          'Tracked synthetic error event',
+        );
       }
     });
 
@@ -295,7 +327,8 @@ export class AppElement extends HTMLElement {
             detail: {
               action: cartAction,
               ...cartContext,
-              price: action === 'remove' ? 0 : Number(cartContext.price ?? 49.99),
+              price:
+                action === 'remove' ? 0 : Number(cartContext.price ?? 49.99),
             },
           }),
         );
@@ -304,7 +337,6 @@ export class AppElement extends HTMLElement {
       button.addEventListener('click', handler);
       this._cleanup.push(() => button.removeEventListener('click', handler));
     });
-
   }
 
   private mountNativeSurface() {
@@ -328,12 +360,20 @@ export class AppElement extends HTMLElement {
       const parts: string[] = [];
       parts.push(target.tagName.toLowerCase());
 
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement
+      ) {
         const field = target.name || target.id || target.type || 'field';
         parts.push(field);
         if (target instanceof HTMLInputElement && target.type === 'checkbox') {
           parts.push(target.checked ? 'checked' : 'unchecked');
-        } else if ('value' in target && typeof target.value === 'string' && target.value.length > 0) {
+        } else if (
+          'value' in target &&
+          typeof target.value === 'string' &&
+          target.value.length > 0
+        ) {
           parts.push(target.value.slice(0, 48));
         }
       } else if (target instanceof HTMLButtonElement && target.textContent) {
@@ -352,7 +392,9 @@ export class AppElement extends HTMLElement {
 
     for (const type of trackedTypes) {
       document.addEventListener(type, handler, true);
-      this._cleanup.push(() => document.removeEventListener(type, handler, true));
+      this._cleanup.push(() =>
+        document.removeEventListener(type, handler, true),
+      );
     }
   }
 
@@ -363,10 +405,15 @@ export class AppElement extends HTMLElement {
         trackVisibility: true,
         trackTimeOnPage: true,
       }),
-      mountClick(this._client),
       mountCart(this._client),
-      mountFormAbandon(this._client),
+      mountClick(this._client),
+      mountCopyPaste(this._client),
+      mountDeadClick(this._client),
       mountErrorCapture(this._client),
+      mountExitIntent(this._client),
+      mountFormAbandon(this._client),
+      mountFormInteraction(this._client),
+      mountRageClick(this._client),
     ];
 
     for (const cleanup of cleanupFns) this._cleanup.push(cleanup);
@@ -377,7 +424,11 @@ export class AppElement extends HTMLElement {
     if (!consentState) return;
     const status = this._consent.getStatus();
     consentState.textContent =
-      status === ConsentStatus.GRANTED ? 'Granted' : status === ConsentStatus.DENIED ? 'Denied' : 'Pending';
+      status === ConsentStatus.GRANTED
+        ? 'Granted'
+        : status === ConsentStatus.DENIED
+          ? 'Denied'
+          : 'Pending';
   }
 
   private scheduleDiagnosticsRefresh() {
@@ -386,7 +437,9 @@ export class AppElement extends HTMLElement {
 
   private async refreshDiagnostics() {
     const diagnostics = this._client.diagnostics();
-    const idbQueueSize = await Promise.resolve(diagnostics.idbQueueSize).catch(() => 0);
+    const idbQueueSize = await Promise.resolve(diagnostics.idbQueueSize).catch(
+      () => 0,
+    );
     const snapshot: DiagnosticsEntry = {
       eventsQueued: diagnostics.eventsQueued,
       eventsSent: diagnostics.eventsSent,
@@ -405,15 +458,35 @@ export class AppElement extends HTMLElement {
       if (element) element.textContent = value;
     };
 
-    setText('[data-role="diag-events-queued"]', formatDiagnosticsCount(snapshot.eventsQueued));
-    setText('[data-role="diag-events-sent"]', formatDiagnosticsCount(snapshot.eventsSent));
-    setText('[data-role="diag-events-dropped"]', formatDiagnosticsCount(snapshot.eventsDropped));
-    setText('[data-role="diag-circuit-open"]', snapshot.circuitOpen ? 'Open' : 'Closed');
+    setText(
+      '[data-role="diag-events-queued"]',
+      formatDiagnosticsCount(snapshot.eventsQueued),
+    );
+    setText(
+      '[data-role="diag-events-sent"]',
+      formatDiagnosticsCount(snapshot.eventsSent),
+    );
+    setText(
+      '[data-role="diag-events-dropped"]',
+      formatDiagnosticsCount(snapshot.eventsDropped),
+    );
+    setText(
+      '[data-role="diag-circuit-open"]',
+      snapshot.circuitOpen ? 'Open' : 'Closed',
+    );
     setText('[data-role="diag-session-id"]', snapshot.sessionId);
     setText('[data-role="diag-window-id"]', snapshot.windowId);
     setText('[data-role="diag-anon-id"]', snapshot.anonId);
-    setText('[data-role="diag-idb-queue-size"]', formatDiagnosticsCount(snapshot.idbQueueSize));
-    setText('[data-role="diag-dnt"]', snapshot.dntActive ? '⚠️ Active (consent overridden — ignoreDnt=true)' : 'Not set');
+    setText(
+      '[data-role="diag-idb-queue-size"]',
+      formatDiagnosticsCount(snapshot.idbQueueSize),
+    );
+    setText(
+      '[data-role="diag-dnt"]',
+      snapshot.dntActive
+        ? '⚠️ Active (consent overridden — ignoreDnt=true)'
+        : 'Not set',
+    );
 
     const dropped = this.querySelector('[data-role="diag-dropped-reasons"]');
     if (dropped) dropped.textContent = snapshot.droppedByReason;
@@ -481,7 +554,10 @@ export class AppElement extends HTMLElement {
       .join('');
   }
 
-  private _recordTransport(batch: { sentAt?: number; eventNames: string[] } | null, rawBody: string) {
+  private _recordTransport(
+    batch: { sentAt?: number; eventNames: string[] } | null,
+    rawBody: string,
+  ) {
     const entry: TransportBatchEntry = {
       sentAt: batch?.sentAt,
       eventCount: batch?.eventNames.length ?? 0,
@@ -513,7 +589,12 @@ export class AppElement extends HTMLElement {
   }
 
   private _addQueueEntry(name: string, props: Record<string, unknown>) {
-    this._queueEntries.unshift({ name, ts: Date.now(), props: pretty(props), status: 'queued' });
+    this._queueEntries.unshift({
+      name,
+      ts: Date.now(),
+      props: pretty(props),
+      status: 'queued',
+    });
     this._queueEntries.splice(40);
     this.renderQueueFeed();
   }

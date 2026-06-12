@@ -1,5 +1,5 @@
 import type { WinceClient } from '../client';
-import { useClickCapture } from './_click-utils';
+import { useBroadCapture } from './_click-utils';
 
 export interface RageClickOptions {
   /** Number of clicks within `windowMs` that triggers a rage-click. Default: 3. */
@@ -20,11 +20,10 @@ interface ClickRecord {
  * Rage-click detection plugin.
  *
  * Emits `$rage_click` when the same element is clicked `threshold` or more
- * times within `windowMs` milliseconds. Uses the same element whitelist and
- * PII exclusions as `mountClick` via the shared `sanitizeClick()` utility.
- *
- * Uses the shared `useClickCapture` dispatcher so `sanitizeClick()` runs
- * exactly once per click even when multiple click plugins are mounted.
+ * times within `windowMs` milliseconds. Uses the broad click dispatcher so
+ * ALL interactive-looking surfaces are covered — including non-semantic
+ * containers styled with `cursor:pointer`, custom components identified by
+ * ARIA role, and elements tracked via `[tabindex]` or `[onclick]`.
  *
  * @returns A cleanup function that removes the event listener.
  */
@@ -47,7 +46,7 @@ export function mountRageClick(tracker: WinceClient, options?: RageClickOptions)
     return t;
   }
 
-  const unsub = useClickCapture((data) => {
+  const unsub = useBroadCapture((data) => {
     const el  = data.target as Element;
     const now = Date.now();
     const rec = records.get(el);

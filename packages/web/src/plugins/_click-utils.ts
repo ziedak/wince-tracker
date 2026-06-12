@@ -17,7 +17,11 @@ export interface ClickData {
 }
 
 const WHITELIST_SELECTOR =
-  'a, button, input[type=submit], input[type=button], label, [role=button], [data-track]';
+  'a, button, input[type=submit], input[type=button], input[type=checkbox], input[type=radio], ' +
+  'select, label, ' +
+  '[role=button], [role=link], [role=tab], [role=menuitem], [role=menuitemcheckbox], ' +
+  '[role=menuitemradio], [role=option], [role=checkbox], [role=radio], [role=switch], ' +
+  '[role=treeitem], [data-track]';
 
 const TEXT_MAX_LEN = 256;
 
@@ -280,6 +284,122 @@ export function useClickCapture(fn: ClickConsumer): () => void {
     if (_consumers.size === 0 && _clickListenerAttached) {
       document.removeEventListener('click', _dispatchClick, { capture: true });
       _clickListenerAttached = false;
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Broad target resolution — for behavioral plugins (rageClick, deadClick)
+// ---------------------------------------------------------------------------
+
+/**
+ * Matches all semantically or visually interactive elements beyond the
+ * tracking whitelist, including every ARIA role that implies interactivity.
+ * Used by behavioral plugins to detect rage/dead clicks on any interactive
+ * surface, not just the PII-safe tracking whitelist.
+ */
+const BROAD_SELECTOR =
+  'a, button, input, select, textarea, ' +
+  '[role=button], [role=link], [role=tab], [role=menuitem], [role=menuitemcheckbox], ' +
+  '[role=menuitemradio], [role=option], [role=checkbox], [role=radio], [role=combobox], ' +
+  '[role=switch], [role=treeitem], [role=gridcell], [tabindex], [onclick]';
+
+/**
+ * Finds the nearest interactive ancestor/self of `el` using a broad heuristic:
+ * tries BROAD_SELECTOR first, then falls back to a CSS `cursor:pointer` walk.
+ * Returns `null` if no interactive surface is found before `<body>`.
+ */
+export function resolveBroadTarget(el: Element): Element | null {
+  const semantic = el.closest(BROAD_SELECTOR);
+  if (semantic && semantic.tagName !== 'HTML' && semantic.tagName !== 'BODY') {
+    return semantic;
+  }
+  // CSS pointer affordance walk — covers styled non-semantic containers.
+  let cur: Element | null = el;
+  while (cur && cur.tagName !== 'HTML' && cur.tagName !== 'BODY') {
+    if (typeof window !== 'undefined' && window.getComputedStyle(cur).cursor === 'pointer') {
+      return cur;
+    }
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
+function buildBroadClickData(event: MouseEvent): ClickData | null {
+  const raw = event.target as Element | null;
+  if (!raw) return null;
+  if (raw.closest('[data-track="false"]')) return null;
+
+  const el = resolveBroadTarget(raw);
+  if (!el) return null;
+
+  const tag = el.tagName.toLowerCase();
+  // PII guard: omit text from password / payment-card fields but still emit the event.
+  const text = isExcludedInput(el)
+    ? ''
+    : ((el as HTMLElement).innerText || (el as HTMLElement).textContent || '').trim().slice(0, TEXT_MAX_LEN);
+  const href    = (el as HTMLAnchorElement).href || undefined;
+  const trackId = el.getAttribute('data-track') || undefined;
+
+  const attrs: Record<string, string> = {};
+  for (const attr of Array.from(el.attributes)) {
+    if (attr.name.startsWith('data-track-') && attr.name !== 'data-track-label') {
+      attrs[attr.name.slice('data-track-'.length)] = attr.value;
+    }
+  }
+
+  return {
+    tag,
+    text,
+    href,
+    trackId,
+    attrs,
+    elements_chain: buildElementsChain(el),
+    target: el,
+    hasModifier: event.ctrlKey || event.metaKey || event.altKey || event.shiftKey,
+  };
+}
+
+type BroadConsumer = (data: ClickData) => void;
+
+const _broadConsumers = new Set<BroadConsumer>();
+let _broadListenerAttached = false;
+
+function _dispatchBroadClick(e: MouseEvent): void {
+  let data: ClickData | null;
+  try {
+    data = buildBroadClickData(e);
+  } catch {
+    return;
+  }
+  if (!data) return;
+  for (const fn of _broadConsumers) {
+    try {
+      fn(data);
+    } catch {
+      // consumer threw — don't break others
+    }
+  }
+}
+
+/**
+ * Subscribe to broad click data covering all interactive-looking surfaces,
+ * including non-semantic elements with `cursor:pointer`. Behavioral plugins
+ * (rageClick, deadClick) use this instead of useClickCapture.
+ *
+ * @returns An unsubscribe function.
+ */
+export function useBroadCapture(fn: BroadConsumer): () => void {
+  _broadConsumers.add(fn);
+  if (!_broadListenerAttached && typeof document !== 'undefined') {
+    _broadListenerAttached = true;
+    document.addEventListener('click', _dispatchBroadClick, { capture: true });
+  }
+  return () => {
+    _broadConsumers.delete(fn);
+    if (_broadConsumers.size === 0 && _broadListenerAttached) {
+      document.removeEventListener('click', _dispatchBroadClick, { capture: true });
+      _broadListenerAttached = false;
     }
   };
 }
