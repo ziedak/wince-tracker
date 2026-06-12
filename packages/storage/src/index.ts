@@ -1,1 +1,2 @@
-export * from './lib/storage';
+export * from './stores/storage';
+export * from './DurableQueue';

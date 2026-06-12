@@ -52,7 +52,7 @@
     <div id="log"><div class="entry info"><span class="ts">--</span>Waiting for SDK…</div></div>
 
     <!-- Lite bundle (no auto-plugins) copied into vendor/ by the rollup build -->
-    <script src="./vendor/index.lite.umd.js"></script>
+    <script src="./vendor/index.umd.js"></script>
 
     <script>
       (function () {
@@ -114,7 +114,7 @@
           consent:        null,    // disable consent gating for the sandbox
           fetch:          interceptFetch,
         });
-
+mountPageView(tracker,{});
         append('SDK initialised — consent gating disabled for sandbox', 'info');
 
         // ----------------------------------------------------------------

@@ -1,16 +1,17 @@
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import {
-  MemoryStore,
-  LocalStore,
-  SessionStore,
-  CookieStore,
+ 
   createStore,
   getRootDomain,
   resetRootDomainCache,
-  DurableQueue,
-  type PersistedEvent,
-} from './storage';
+
+} from './stores/storage';
+import { MemoryStore } from './stores/MemoryStore';
+import { LocalStore } from './stores/LocalStore';
+import { SessionStore } from './stores/SessionStore';
+import { CookieStore } from './stores/CookieStore';
+import { DurableQueue, PersistedEvent } from './DurableQueue';
 
 // ===========================================================================
 // MemoryStore

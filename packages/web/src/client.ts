@@ -18,6 +18,8 @@ import { buildBaseDiagnostics } from './lib/diagnostics';
 import { fetchEnrichment } from './lib/enrichment';
 import { applyEnrichmentOnceToEvents } from './lib/preEnrich';
 import { BaseClient } from './lib/baseClient';
+import { mountPageView, PageViewOptions } from './plugins/pageView';
+import { mountClick } from './plugins/click';
 
 // ---------------------------------------------------------------------------
 // Adapter: IStore (unknown-typed get) → MinimalStore (string | null get)
@@ -293,6 +295,7 @@ export class WinceClient extends BaseClient {
     props?: Record<string, unknown>,
     personProps?: PersonProps,
   ): void {
+    console.debug('[Wince] track', name, props, personProps);
     if (this._consent !== null && !this._consent.isGranted()) {
       this._drop('consent');
       return;
@@ -629,6 +632,7 @@ export class WinceClient extends BaseClient {
         };
       }
     ).connection;
+
     const applyConnectionConfig = () => {
       const cfg = _batchConfigForConnection(conn?.effectiveType ?? '');
       if (cfg)
@@ -688,3 +692,7 @@ function _batchConfigForConnection(effectiveType: string): BatchConfig | null {
 export function init(config: WinceConfig): WinceClient {
   return new WinceClient(config);
 }
+export function  activatePlugins(client: WinceClient): void {
+    mountPageView(client);
+    mountClick(client);
+  }

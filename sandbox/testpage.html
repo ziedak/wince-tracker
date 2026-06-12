@@ -5,28 +5,13 @@
     <link rel="shortcut icon" href="#" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Vite + TS</title>
-    <script src="./vendor/index.lite.umd.js"></script>
+    <script src="./vendor/index.umd.js"></script>
   </head>
   <body>
-    <script>
-      const W = window.WinceLite;
-      if (!W) {
-        append(
-          'WinceLite not found — run `pnpm nx run @wince/web:build` first',
-          'err',
-        );
-        return;
-      }
-
-      const tracker = W.init({
-        endpoint: 'https://httpbin.org/post',
-        compress: false, // readable JSON in Network tab
-        batchSize: 5,
-        batchTimeoutMs: 1500,
-        consent: null, // disable consent gating for the sandbox
-        fetch: interceptFetch,
-      });
-    </script>
+    <h3>Event log</h3>
+    <div id="log">
+      <div class="entry info"><span class="ts">--</span>Waiting for SDK…</div>
+    </div>
     <div id="app">
       <h1>Tracker Test Page</h1>
       <button id="test-btn" class="trackable">Click Me</button>
@@ -534,6 +519,76 @@
           }
         });
       }
+    </script>
+    <script>
+      (function () {
+        const log = document.getElementById('log');
+
+        function append(text, cls) {
+          const ts = new Date().toISOString().slice(11, 23);
+          const div = document.createElement('div');
+          div.className = 'entry ' + (cls || '');
+          div.innerHTML = '<span class="ts">' + ts + '</span>' + escHtml(text);
+          log.appendChild(div);
+          log.scrollTop = log.scrollHeight;
+        }
+
+        function escHtml(s) {
+          return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        }
+
+        // ----------------------------------------------------------------
+        // Intercept fetch so we can log every outgoing batch
+        // ----------------------------------------------------------------
+        const _origFetch = window.fetch.bind(window);
+        const interceptFetch = function (url, init) {
+          let bodyPreview = '';
+          try {
+            if (typeof init.body === 'string') {
+              bodyPreview = init.body.slice(0, 400);
+            } else if (init.body instanceof Uint8Array) {
+              bodyPreview = '[gzip ' + init.body.byteLength + ' bytes]';
+            }
+          } catch (_) {}
+          append('→ POST ' + url + '\n' + bodyPreview, 'ok');
+          return _origFetch(url, init)
+            .then(function (res) {
+              append('← ' + res.status + ' ' + res.url, res.ok ? 'ok' : 'err');
+              return res;
+            })
+            .catch(function (err) {
+              append('← ERROR: ' + err.message, 'err');
+              throw err;
+            });
+        };
+
+        // ----------------------------------------------------------------
+        // Init SDK (starts paused — consent not yet granted)
+        // ----------------------------------------------------------------
+        const W = window.Wince;
+        if (!W) {
+          append(
+            'Wince not found — run `pnpm nx run @wince/web:build` first',
+            'err',
+          );
+          return;
+        }
+
+        const tracker = W.init({
+          endpoint: 'https://httpbin.org/post',
+          compress: false, // readable JSON in Network tab
+          batchSize: 5,
+          batchTimeoutMs: 1500,
+          consent: null, // disable consent gating for the sandbox
+          fetch: interceptFetch,
+        });
+        W.mountClick(tracker);
+        W.mountPageView(tracker,{});
+        append('SDK initialised — consent gating disabled for sandbox', 'info');
+      })();
     </script>
   </body>
 </html>
