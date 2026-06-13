@@ -29,7 +29,7 @@ describe('mountRageClick', () => {
       tag: 'button',
       count: 3,
       elements_chain: expect.any(String),
-    }));
+    }), undefined, { priority: 'critical' });
 
     cleanup();
   });
@@ -57,7 +57,7 @@ describe('mountRageClick', () => {
       tag: 'div',
       count: 3,
       $plugin_source: 'rageClick',
-    }));
+    }), undefined, { priority: 'critical' });
 
     cleanup();
   });
@@ -76,7 +76,7 @@ describe('mountRageClick', () => {
     jest.setSystemTime(2_200);
     tab.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
-    expect(tracker.track).toHaveBeenCalledWith('$rage_click', expect.objectContaining({ tag: 'div', count: 3 }));
+    expect(tracker.track).toHaveBeenCalledWith('$rage_click', expect.objectContaining({ tag: 'div', count: 3 }), undefined, { priority: 'critical' });
 
     cleanup();
   });

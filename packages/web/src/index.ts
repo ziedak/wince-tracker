@@ -14,7 +14,7 @@ export type { ClickData } from './plugins/click';
 export { mountRageClick } from './plugins/rageClick';
 export type { RageClickOptions } from './plugins/rageClick';
 export { mountCart } from './plugins/cart';
-export type { CartEventDetail } from './plugins/cart';
+export type { CartEventDetail, CartOptions } from './plugins/cart';
 export { mountFormAbandon } from './plugins/formAbandon';
 export type { FormAbandonOptions } from './plugins/formAbandon';
 export { mountErrorCapture } from './plugins/errorCapture';
@@ -32,8 +32,12 @@ export type { FormInteractionOptions } from './plugins/formInteraction';
 export { mountElementVisibility } from './plugins/elementVisibility';
 export type { ElementVisibilityOptions } from './plugins/elementVisibility';
 export { mountTabFocus } from './plugins/tabFocus';
+export { mountTabIdle } from './plugins/tabIdle';
+export type { TabIdleOptions } from './plugins/tabIdle';
 export { mountTextSelection } from './plugins/textSelection';
 export { mountNetworkQuality } from './plugins/networkQuality';
+export { mountPerformance } from './plugins/performance';
+export type { PerformanceOptions } from './plugins/performance';
 
 // Form friction signal plugins
 export { mountValidationError } from './plugins/validationError';

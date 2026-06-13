@@ -47,11 +47,5 @@ export interface TransportOptions {
   onDropped?: (reason: DropReason, item?: EventPayload) => void;
   /** Called after each HTTP batch is successfully delivered. */
   onBatchDelivered?: (eids: string[]) => void;
-  /**
-   * Priority scorer used during `drain()` to sort events before packing.
-   * Higher scores are packed into beacons first.
-   * Default: insertion order (all events equal priority).
-   */
-  eventPriority?: (event: EventPayload) => number;
 }
 

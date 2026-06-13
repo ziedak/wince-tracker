@@ -25,7 +25,7 @@ describe('mountDeadClick', () => {
       tag: 'button',
       elements_chain: expect.any(String),
       elapsed_ms: expect.any(Number),
-    }));
+    }), undefined, { priority: 'critical' });
 
     cleanup();
   });
@@ -82,7 +82,7 @@ describe('mountDeadClick', () => {
     a.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     jest.advanceTimersByTime(400);
 
-    expect(tracker.track).toHaveBeenCalledWith('$dead_click', expect.objectContaining({ tag: 'a' }));
+    expect(tracker.track).toHaveBeenCalledWith('$dead_click', expect.objectContaining({ tag: 'a' }), undefined, { priority: 'critical' });
 
     cleanup();
   });
@@ -97,7 +97,7 @@ describe('mountDeadClick', () => {
     card.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     jest.advanceTimersByTime(400);
 
-    expect(tracker.track).toHaveBeenCalledWith('$dead_click', expect.objectContaining({ tag: 'div' }));
+    expect(tracker.track).toHaveBeenCalledWith('$dead_click', expect.objectContaining({ tag: 'div' }), undefined, { priority: 'critical' });
 
     cleanup();
   });

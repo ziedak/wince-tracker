@@ -14,7 +14,7 @@ describe('mountExitIntent', () => {
     document.dispatchEvent(ev);
 
     expect(tracker.track).toHaveBeenCalledTimes(1);
-    expect(tracker.track).toHaveBeenCalledWith('$exit_intent', expect.objectContaining({ page: expect.any(String) }));
+    expect(tracker.track).toHaveBeenCalledWith('$exit_intent', expect.objectContaining({ page: expect.any(String) }), undefined, { priority: 'critical' });
 
     // second event ignored
     document.dispatchEvent(ev);

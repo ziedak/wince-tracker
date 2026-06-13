@@ -202,7 +202,7 @@ export function mountFormAbandon(
         fields_filled: Array.from(fieldsFilled),
         field_count:   fieldsFilled.size,
         $plugin_source: 'formAbandon',
-      });
+      }, undefined, { priority: 'high' });
     }
   };
 

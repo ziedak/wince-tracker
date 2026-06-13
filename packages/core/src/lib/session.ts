@@ -62,6 +62,7 @@ export class SessionManager {
   private _state: SessionState | null = null;
   private _lastSavedAt = 0;
   private _removeStorageListener?: () => void;
+  private _bc?: BroadcastChannel;
 
   constructor(opts: SessionManagerOptions = {}) {
     this._idleTimeoutMs = opts.idleTimeoutMs ?? DEFAULT_IDLE_MS;
@@ -69,6 +70,7 @@ export class SessionManager {
     this._store         = opts.store;
     this._load();
     this._attachStorageListener();
+    this._attachBroadcastChannel();
   }
 
   /** Returns the current session ID, starting a new session if the previous one has expired. */
@@ -89,6 +91,8 @@ export class SessionManager {
   /**
    * Record user activity — extends the current session.
    * Starts a new session if the current one has expired.
+   * Broadcasts the activity to other tabs via BroadcastChannel so they
+   * reset their own idle countdown without starting a new session.
    */
   touch(): void {
     const now = Date.now();
@@ -99,6 +103,10 @@ export class SessionManager {
       if (now - this._lastSavedAt >= ACTIVITY_PERSIST_GRANULARITY_MS) {
         this._save(now);
       }
+    }
+    // Notify other tabs — send after state is updated so sid is current.
+    if (this._state) {
+      this._bc?.postMessage({ type: 'activity', sid: this._state.sid });
     }
   }
 
@@ -164,9 +172,11 @@ export class SessionManager {
     this._attachStorageListener();
   }
 
-  /** Remove the cross-tab storage listener. Call when the client is closed. */
+  /** Remove cross-tab listeners. Call when the client is closed. */
   destroy(): void {
     this._removeStorageListener?.();
+    this._bc?.close();
+    this._bc = undefined;
   }
 
   // --------------------------------------------------------------------------
@@ -194,6 +204,33 @@ export class SessionManager {
       this._store.set(SESSION_KEY, JSON.stringify(this._state));
     }
     this._lastSavedAt = now;
+  }
+
+  /**
+   * Open a BroadcastChannel so activity in any tab resets the idle countdown
+   * in all other tabs on the same origin — without requiring a storage write.
+   * Falls back silently when BroadcastChannel is not available (e.g. workers).
+   */
+  private _attachBroadcastChannel(): void {
+    if (typeof BroadcastChannel === 'undefined') return;
+    this._bc?.close();
+    const bc = new BroadcastChannel('wince_session');
+    bc.onmessage = (ev: MessageEvent) => {
+      const msg = ev.data as unknown;
+      if (
+        typeof msg !== 'object' || msg === null ||
+        (msg as { type: unknown }).type !== 'activity' ||
+        typeof (msg as { sid: unknown }).sid !== 'string'
+      ) return;
+      // Only reset if the message is for our current session.
+      if (this._state?.sid !== (msg as { sid: string }).sid) return;
+      // Update lastActiveAt WITHOUT calling touch() — avoids broadcast echo loop.
+      const now = Date.now();
+      if (!this._isExpired(now)) {
+        this._state!.lastActiveAt = now;
+      }
+    };
+    this._bc = bc;
   }
 
   /**

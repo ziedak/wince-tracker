@@ -79,6 +79,22 @@ export interface EventContext {
   ref?: string;
 }
 
+/** Delivery priority for an event. */
+export type EventPriority = 'critical' | 'high' | 'normal';
+
+/**
+ * Optional delivery options passed to `tracker.track()` as the fourth argument.
+ */
+export interface TrackOptions {
+  /**
+   * Delivery priority.
+   * - `'critical'` — sent immediately via a dedicated single-event flush (no batching).
+   * - `'high'`     — flushed in small batches every 2 s.
+   * - `'normal'`   — flushed in larger batches every 5 s (default).
+   */
+  priority?: EventPriority;
+}
+
 /**
  * Minimal key/value store interface accepted by SessionManager and
  * IdentityManager. Compatible with every `IStore` implementation in

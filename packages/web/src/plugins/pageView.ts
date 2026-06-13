@@ -7,6 +7,46 @@ export interface PageViewOptions {
   trackVisibility?: boolean;
   /** Track total time between page() calls. Default: true. */
   trackTimeOnPage?: boolean;
+  /** Track scroll depth milestone events (25%, 50%, 75%, 100%). Default: true. Requires trackScrollDepth: true. */
+  trackScrollMilestones?: boolean;
+}
+
+const _MILESTONES = [25, 50, 75, 100] as const;
+const _SEARCH_ENGINES = ['google.', 'bing.', 'yahoo.', 'duckduckgo.', 'baidu.', 'ecosia.', 'yandex.'];
+const _SOCIAL_DOMAINS = ['facebook.', 'instagram.', 'twitter.', 'x.com', 'linkedin.', 'tiktok.', 'pinterest.', 'reddit.', 'snapchat.'];
+
+function _buildUtmProps(search: string): Record<string, string> {
+  const params = new URLSearchParams(search);
+  const result: Record<string, string> = {};
+  for (const k of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term']) {
+    const v = params.get(k);
+    if (v) result[k] = v;
+  }
+  return result;
+}
+
+function _getDeviceType(width: number): 'mobile' | 'tablet' | 'desktop' {
+  if (width <= 768) return 'mobile';
+  if (width <= 1024) return 'tablet';
+  return 'desktop';
+}
+
+function _classifyReferrer(
+  referrer: string,
+  host: string,
+): 'direct' | 'organic_search' | 'social' | 'internal' | 'referral' {
+  if (!referrer) return 'direct';
+  try {
+    const ref = new URL(referrer);
+    if (ref.hostname === host || ref.hostname.endsWith('.' + host)) return 'internal';
+    const h = ref.hostname;
+    if (_SEARCH_ENGINES.some(d => h.includes(d))) return 'organic_search';
+    if (_SOCIAL_DOMAINS.some(d => h.includes(d))) return 'social';
+    return 'referral';
+  } catch {
+    // unparseable referrer — treat as direct
+    return 'direct';
+  }
 }
 
 function _scrollState() {
@@ -38,9 +78,10 @@ function _scrollState() {
 export function mountPageView(tracker: WinceClient, options?: PageViewOptions): () => void {
   if (typeof window === 'undefined') return () => undefined;
 
-  const trackScrollDepth = options?.trackScrollDepth ?? true;
-  const trackVisibility  = options?.trackVisibility  ?? true;
-  const trackTimeOnPage  = options?.trackTimeOnPage  ?? true;
+  const trackScrollDepth     = options?.trackScrollDepth     ?? true;
+  const trackVisibility      = options?.trackVisibility      ?? true;
+  const trackTimeOnPage      = options?.trackTimeOnPage      ?? true;
+  const trackScrollMilestones = trackScrollDepth && (options?.trackScrollMilestones ?? true);
 
   // Capture the Navigation Timing API entry once at mount — only meaningful for
   // full-page loads; value is `undefined` in environments without Performance API.
@@ -53,6 +94,30 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
     const p: Record<string, unknown> = { navigation_type: _navType };
     if (_navType === 'back_forward') p['$session_resume'] = true;
     return p;
+  }
+
+  function buildInitialPageProps(): Record<string, unknown> {
+    const utmProps = _buildUtmProps(location.search);
+    const utmMedium = utmProps['utm_medium'];
+    let referrerType: string = _classifyReferrer(document.referrer, location.hostname);
+    if (utmMedium === 'email') referrerType = 'email';
+    else if (utmMedium === 'cpc' || utmMedium === 'paid') referrerType = 'paid_search';
+    return {
+      ...utmProps,
+      device_type: _getDeviceType(window.innerWidth),
+      screen_width_px: screen.width,
+      screen_height_px: screen.height,
+      referrer_type: referrerType,
+    };
+  }
+
+  function buildNavPageProps(): Record<string, unknown> {
+    return {
+      ..._buildUtmProps(location.search),
+      device_type: _getDeviceType(window.innerWidth),
+      screen_width_px: screen.width,
+      screen_height_px: screen.height,
+    };
   }
 
   // ---------- scroll state ----------
@@ -78,6 +143,10 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
   let _visibleMs    = 0;
   let _visibleStart = (trackVisibility && document.visibilityState === 'visible') ? Date.now() : 0;
   let _pageStartAt  = Date.now();
+
+  // ---------- milestone & session state ----------
+  let _milestonesFired = new Set<number>();
+  const _sessionStartAt = Date.now();
 
   function snapshotVisibility(): void {
     if (_visibleStart > 0) {
@@ -129,6 +198,7 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
       _visibleStart = document.visibilityState === 'visible' ? Date.now() : 0;
     }
     _pageStartAt = Date.now();
+    _milestonesFired.clear();
   }
 
   // ---------- prerender guard ----------
@@ -139,13 +209,13 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
   let _pendingFirstPage = document.visibilityState !== 'visible';
 
   if (!_pendingFirstPage) {
-    tracker.page({ ...buildNavProps(), $plugin_source: 'pageView' });
+    tracker.page({ ...buildNavProps(), ...buildInitialPageProps(), $plugin_source: 'pageView' });
     resetMetrics();
   }
 
   // SPA navigation — fire page() with accumulated metrics, then reset.
   const onNavigate = () => {
-    tracker.page({ ...buildMetrics(), $plugin_source: 'pageView' });
+    tracker.page({ ...buildMetrics(), ...buildNavPageProps(), $plugin_source: 'pageView' });
     resetMetrics();
   };
 
@@ -187,6 +257,14 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
       _contentH      = s.contentH;
       if (s.pct > _maxScrollPct) _maxScrollPct = s.pct;
       if (s.y   > _maxScrollY)   _maxScrollY   = s.y;
+      if (trackScrollMilestones) {
+        for (const m of _MILESTONES) {
+          if (_maxScrollPct >= m && !_milestonesFired.has(m)) {
+            _milestonesFired.add(m);
+            tracker.track('$scroll_depth', { depth_pct: m, $plugin_source: 'pageView' });
+          }
+        }
+      }
     }
 
     scrollHandler = () => {
@@ -240,7 +318,7 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
         if (_pendingFirstPage) {
           // Page was prerendered — fire the deferred first page view now.
           _pendingFirstPage = false;
-          tracker.page({ ...buildNavProps(), $plugin_source: 'pageView' });
+          tracker.page({ ...buildNavProps(), ...buildInitialPageProps(), $plugin_source: 'pageView' });
           resetMetrics(); // starts fresh timers from this moment
           return;
         }
@@ -259,7 +337,7 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
       if (document.visibilityState !== 'visible') return;
       _pendingFirstPage = false;
       document.removeEventListener('visibilitychange', onceVisible);
-      tracker.page({ ...buildNavProps(), $plugin_source: 'pageView' });
+      tracker.page({ ...buildNavProps(), ...buildInitialPageProps(), $plugin_source: 'pageView' });
       resetMetrics();
     };
     document.addEventListener('visibilitychange', onceVisible);
@@ -272,7 +350,7 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
   const removeBeforeDrainHook = tracker.addBeforeDrainHook(() => {
     if (_pendingFirstPage) return; // page was never made visible — no $page_view to pair with
     if (trackVisibility) snapshotVisibility();
-    tracker.track('$page_leave', { ...buildMetrics(''), $plugin_source: 'pageView' }); // no $prev_ prefix — metrics belong to this page
+    tracker.track('$page_leave', { ...buildMetrics(''), session_duration_ms: Date.now() - _sessionStartAt, $plugin_source: 'pageView' }); // no $prev_ prefix — metrics belong to this page
   });
 
   window.addEventListener('popstate',   onNavigate);

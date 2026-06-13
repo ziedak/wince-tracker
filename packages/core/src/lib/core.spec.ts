@@ -23,6 +23,7 @@ describe('@wince/core barrel exports', () => {
   it('SessionManager returns a session ID', () => {
     const mgr = new SessionManager();
     expect(isValidUuid(mgr.getSid())).toBe(true);
+    mgr.destroy();
   });
 
   it('IdentityManager returns an anonymous ID', () => {

@@ -47,7 +47,7 @@ export function mountDeadClick(
         elapsed_ms:     Date.now() - c.at,
         has_modifier:   c.modifier,
         $plugin_source: 'deadClick',
-      });
+      }, undefined, { priority: 'critical' });
     }
     pending.length = 0;
   }

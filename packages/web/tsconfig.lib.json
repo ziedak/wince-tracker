@@ -15,19 +15,16 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../storage/tsconfig.lib.json"
+    },
+    {
       "path": "../cache/tsconfig.lib.json"
     },
     {
       "path": "../consent/tsconfig.lib.json"
     },
     {
-      "path": "../compress/tsconfig.lib.json"
-    },
-    {
       "path": "../transport/tsconfig.lib.json"
-    },
-    {
-      "path": "../utils/tsconfig.lib.json"
     },
     {
       "path": "../core/tsconfig.lib.json"

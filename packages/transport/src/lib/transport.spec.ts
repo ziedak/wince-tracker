@@ -257,3 +257,125 @@ describe('Transport — retry on HTTP errors', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Three-lane priority routing
+// ---------------------------------------------------------------------------
+
+describe('Transport — priority routing', () => {
+  it('critical events are flushed to their own batch separate from normal events', async () => {
+    const fetchFn = makeFetch(200);
+    const t = new Transport({
+      url: 'https://example.test/ingest',
+      batchSize: 20,
+      batchTimeoutMs: 60_000,
+      fetch: fetchFn as unknown as (url: string, init: RequestInit) => Promise<Response>,
+    });
+
+    t.send({ event: 'critical_ev', _priority: 'critical' });
+    t.send({ event: 'normal_ev' });
+
+    await t.flush();
+
+    expect(fetchFn.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const allEvents = fetchFn.mock.calls.flatMap(
+      (call) => (JSON.parse(call[1].body as string) as { events: { event: string }[] }).events,
+    );
+    expect(allEvents.map((e) => e.event).sort()).toEqual(['critical_ev', 'normal_ev']);
+    await t.close();
+  });
+
+  it('all three lanes are flushed and events are routed correctly', async () => {
+    const fetchFn = makeFetch(200);
+    const t = new Transport({
+      url: 'https://example.test/ingest',
+      batchSize: 20,
+      batchTimeoutMs: 60_000,
+      fetch: fetchFn as unknown as (url: string, init: RequestInit) => Promise<Response>,
+    });
+
+    t.send({ event: 'high_ev', _priority: 'high' });
+    t.send({ event: 'normal_ev' });
+    t.send({ event: 'critical_ev', _priority: 'critical' });
+
+    await t.flush();
+
+    const allEvents = fetchFn.mock.calls.flatMap(
+      (call) => (JSON.parse(call[1].body as string) as { events: { event: string }[] }).events,
+    );
+    expect(allEvents.map((e) => e.event).sort()).toEqual(['critical_ev', 'high_ev', 'normal_ev']);
+    await t.close();
+  });
+
+  it('drain() emits a beacon per lane that has events', () => {
+    const beaconCount = { value: 0 };
+    const origNavigator = (global as Record<string, unknown>).navigator;
+    Object.defineProperty(global, 'navigator', {
+      value: { sendBeacon: () => { beaconCount.value++; return true; } },
+      configurable: true,
+    });
+
+    const t = new Transport({
+      url: 'https://example.test/ingest',
+      fetch: makeFetch() as unknown as (u: string, i: RequestInit) => Promise<Response>,
+      paused: true,
+    });
+
+    t.send({ event: 'normal_ev' });
+    t.send({ event: 'high_ev', _priority: 'high' });
+    t.send({ event: 'critical_ev', _priority: 'critical' });
+    t.drain();
+
+    expect(beaconCount.value).toBe(3);
+    Object.defineProperty(global, 'navigator', { value: origNavigator, configurable: true });
+  });
+
+  it('queueSize is the sum of all three lanes', () => {
+    const t = new Transport({
+      url: 'https://example.test/ingest',
+      fetch: makeFetch() as unknown as (u: string, i: RequestInit) => Promise<Response>,
+      paused: true,
+    });
+    t.send({ event: 'a' });
+    t.send({ event: 'b', _priority: 'high' });
+    t.send({ event: 'c', _priority: 'critical' });
+    expect(t.queueSize).toBe(3);
+  });
+
+  it('pause/start applies to all three lanes', async () => {
+    const fetchFn = makeFetch(200);
+    const t = new Transport({
+      url: 'https://example.test/ingest',
+      fetch: fetchFn as unknown as (u: string, init: RequestInit) => Promise<Response>,
+      paused: true,
+    });
+
+    t.send({ event: 'critical_ev', _priority: 'critical' });
+    t.send({ event: 'high_ev', _priority: 'high' });
+    t.send({ event: 'normal_ev' });
+
+    expect(fetchFn).not.toHaveBeenCalled();
+    t.start();
+    await t.flush();
+
+    const allEvents = fetchFn.mock.calls.flatMap(
+      (call) => (JSON.parse(call[1].body as string) as { events: { event: string }[] }).events,
+    );
+    expect(allEvents.map((e) => e.event).sort()).toEqual(['critical_ev', 'high_ev', 'normal_ev']);
+    await t.close();
+  });
+
+  it('updateBatchConfig only updates the normal lane, no errors thrown', async () => {
+    const fetchFn = makeFetch(200);
+    const t = new Transport({
+      url: 'https://example.test/ingest',
+      batchSize: 10,
+      batchTimeoutMs: 60_000,
+      fetch: fetchFn as unknown as (url: string, init: RequestInit) => Promise<Response>,
+    });
+    t.updateBatchConfig(3, 1_000);
+    t.send({ event: 'ev' });
+    await t.flush();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    await t.close();
+  });
+});

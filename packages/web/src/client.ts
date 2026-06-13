@@ -10,7 +10,10 @@ import {
   type TrackEvent,
   type PersonProps,
   type MinimalStore,
+  type TrackOptions,
+  type EventPriority,
 } from '@wince/core';
+export type { TrackOptions, EventPriority } from '@wince/core';
 import { createStore, type IStore } from '@wince/storage';
 import type { ConsentProvider } from '@wince/consent';
 import { wireConsent } from './lib/consentWire';
@@ -238,13 +241,6 @@ export class WinceClient extends BaseClient {
       onBatchDelivered: (eids) => {
         this._diag.sent += eids.length;
       },
-      eventPriority: (event) => {
-        const t = event['t'] as string | undefined;
-        if (t === '$checkout_complete') return 100;
-        if (t === '$form_abandon') return 90;
-        if (t?.startsWith('$cart_')) return 80;
-        return 10;
-      },
     });
 
     // React to consent status changes.
@@ -290,13 +286,15 @@ export class WinceClient extends BaseClient {
    * @param personProps - Optional person traits merged into the user record.
    *   `$set` is applied on every occurrence; `$set_once` only when the key
    *   is not yet present on the backend user record.
+   * @param options - Optional delivery options. Use `{ priority: 'critical' }`
+   *   for P0 events that must be sent immediately (exit_intent, rage_click, etc.).
    */
   track(
     name: string,
     props?: Record<string, unknown>,
     personProps?: PersonProps,
+    options?: TrackOptions,
   ): void {
-    //console.debug('[Wince] track', name, props, personProps);
     if (this._consent !== null && !this._consent.isGranted()) {
       this._drop('consent');
       return;
@@ -308,7 +306,7 @@ export class WinceClient extends BaseClient {
       this._drop('sampling');
       return;
     }
-    this._enqueueRaw(name, props, this._pageviewId, undefined, personProps);
+    this._enqueueRaw(name, props, this._pageviewId, undefined, personProps, undefined, options?.priority);
   }
 
   /**
@@ -515,6 +513,7 @@ export class WinceClient extends BaseClient {
     prev_pageview_id?: string,
     personProps?: PersonProps,
     dedupKey?: string | false, // string = override key; false = skip dedup (already checked by caller)
+    priority?: EventPriority,
   ): void {
     // Client-side dedup: drop repeated identical event+props within the TTL window.
     if (dedupKey !== false) {
@@ -556,6 +555,9 @@ export class WinceClient extends BaseClient {
       prev_pageview_id,
       anon_prev: this._identity.getAndClearAnonPrev(),
     };
+
+    // Stamp delivery priority so the Transport can route to the correct lane.
+    if (priority) raw._priority = priority;
 
     // Record error EID so subsequent events can be tagged with $near_error.
     if (name === '$error') {

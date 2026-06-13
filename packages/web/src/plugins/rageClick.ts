@@ -81,7 +81,7 @@ export function mountRageClick(tracker: WinceClient, options?: RageClickOptions)
           }
         }
 
-        tracker.track('$rage_click', props);
+        tracker.track('$rage_click', props, undefined, { priority: 'critical' });
       }
     } else {
       if (rec) {

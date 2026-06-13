@@ -10,22 +10,24 @@ function buildEnvelope(batch: EventPayload[]): string {
   const sent_at = Date.now();
   const events = batch.map((e) => {
     const ts = typeof e['ts'] === 'number' ? (e['ts'] as number) : sent_at;
-    return { ...e, offset: sent_at - ts, schema_v: SCHEMA_VERSION };
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { _priority, ...rest } = e as EventPayload & { _priority?: unknown };
+    return { ...rest, offset: sent_at - ts, schema_v: SCHEMA_VERSION };
   });
   return JSON.stringify({ sent_at, events });
 }
 
 export class Transport {
-  private readonly _exporter: Exporter<EventPayload>;
-  private readonly _url: string;
+  private readonly _critical: Exporter<EventPayload>;
+  private readonly _high:     Exporter<EventPayload>;
+  private readonly _normal:   Exporter<EventPayload>;
+  private readonly _url:      string;
   private readonly _useCompression: boolean;
 
   constructor(opts: TransportOptions) {
     this._url = opts.url;
     this._useCompression = Boolean(opts.compress);
 
-    // When compression is enabled every POST body is gzip'd; declare it upfront
-    // in the sender headers so the flag is set on every request.
     const headers: Record<string, string> = { ...opts.headers };
     if (this._useCompression) headers['Content-Encoding'] = 'gzip';
 
@@ -36,117 +38,184 @@ export class Transport {
       fetch: opts.fetch,
     });
 
-    this._exporter = new Exporter<EventPayload>({
+    const encode = async (batch: EventPayload[]) => {
+      const payload = buildEnvelope(batch);
+      return this._useCompression ? compressSync(payload) : payload;
+    };
+
+    const retryOpts = {
+      attempts:    opts.retry?.attempts,
+      baseDelayMs: opts.retry?.baseDelayMs,
+      maxDelayMs:  opts.retry?.maxDelayMs,
+      factor:      opts.retry?.factor,
+      jitter:      opts.retry?.jitter,
+    };
+
+    const onDropped       = opts.onDropped;
+    const onBatchDelivered = opts.onBatchDelivered
+      ? (items: EventPayload[]) => {
+          const eids = items
+            .map((e) => typeof e['eid'] === 'string' ? (e['eid'] as string) : null)
+            .filter((id): id is string => id !== null);
+          if (eids.length > 0) opts.onBatchDelivered!(eids);
+        }
+      : undefined;
+
+    // ── Critical lane: one event per flush, no hold time. ──────────────────
+    // Events with priority='critical' (exit_intent, rage_click, etc.) are
+    // sent immediately on enqueue — never batched. Rate-limited to a burst of
+    // 10 to prevent storms (e.g. 50 rage-clicks firing 50 requests).
+    this._critical = new Exporter<EventPayload>({
       sender,
-      encode: async (batch) => {
-        const payload = buildEnvelope(batch);
-        return this._useCompression ? compressSync(payload) : payload;
-      },
-      batchSize: opts.batchSize ?? 10,
-      flushIntervalMs: opts.batchTimeoutMs ?? 1_000,
-      maxBufferSize: opts.maxBufferSize ?? 500,
-      retry: {
-        attempts: opts.retry?.attempts,
-        baseDelayMs: opts.retry?.baseDelayMs,
-        maxDelayMs: opts.retry?.maxDelayMs,
-        factor: opts.retry?.factor,
-        jitter: opts.retry?.jitter,
-      },
-      onDropped: opts.onDropped,
-      onBatchDelivered: opts.onBatchDelivered
-        ? (items) => {
-            const eids = items
-              .map((e) =>
-                typeof e['eid'] === 'string' ? (e['eid'] as string) : null,
-              )
-              .filter((id): id is string => id !== null);
-            if (eids.length > 0) opts.onBatchDelivered!(eids);
-          }
-        : undefined,
-      priorityFn: opts.eventPriority,
+      encode,
+      batchSize:      1,
+      flushIntervalMs: 0,
+      maxBufferSize:  50,
+      rateLimit: { bucketSize: 10, refillRate: 10, refillIntervalMs: 1_000 },
+      retry:      retryOpts,
+      onDropped,
+      onBatchDelivered,
+    });
+
+    // ── High lane: small batches, 2 s flush. ───────────────────────────────
+    // purchase, form_abandon, cart add/remove — important but not unload-critical.
+    this._high = new Exporter<EventPayload>({
+      sender,
+      encode,
+      batchSize:      5,
+      flushIntervalMs: 2_000,
+      maxBufferSize:  200,
+      retry:      retryOpts,
+      onDropped,
+      onBatchDelivered,
+    });
+
+    // ── Normal lane: configured batch size + interval. ─────────────────────
+    // All other events — scroll depth, clicks, page_view, etc.
+    this._normal = new Exporter<EventPayload>({
+      sender,
+      encode,
+      batchSize:       opts.batchSize      ?? 10,
+      flushIntervalMs: opts.batchTimeoutMs ?? 5_000,
+      maxBufferSize:   opts.maxBufferSize  ?? 500,
+      retry:      retryOpts,
+      onDropped,
+      onBatchDelivered,
     });
 
     if (opts.paused) {
-      this._exporter.pause();
+      this._critical.pause();
+      this._high.pause();
+      this._normal.pause();
     }
   }
 
+  /**
+   * Route an event to the appropriate priority lane.
+   * The `_priority` field (stamped by WinceClient) controls routing:
+   *   - `'critical'` → critical lane (immediate flush)
+   *   - `'high'`     → high lane (2 s flush)
+   *   - anything else → normal lane (configured flush interval)
+   */
   send(event: EventPayload): void {
-    this._exporter.enqueue(event);
+    const priority = event['_priority'] as string | undefined;
+    if (priority === 'critical') {
+      this._critical.enqueue(event);
+    } else if (priority === 'high') {
+      this._high.enqueue(event);
+    } else {
+      this._normal.enqueue(event);
+    }
   }
 
   get queueSize(): number {
-    return this._exporter.queueSize;
+    return this._critical.queueSize + this._high.queueSize + this._normal.queueSize;
   }
+
   get circuitOpen(): boolean {
-    return this._exporter.circuitOpen;
+    return this._critical.circuitOpen || this._high.circuitOpen || this._normal.circuitOpen;
   }
 
   /**
-   * Resume automatic flushing. Call after consent is confirmed or
+   * Resume automatic flushing on all lanes. Call after consent is confirmed or
    * the network comes back online.
    */
   start(): void {
-    this._exporter.start();
+    this._critical.start();
+    this._high.start();
+    this._normal.start();
   }
 
   /**
-   * Pause automatic flushing. Events added while paused are buffered
-   * and will be sent once start() is called.
+   * Pause automatic flushing on all lanes. Events added while paused are
+   * buffered and will be sent once start() is called.
    */
   pause(): void {
-    this._exporter.pause();
+    this._critical.pause();
+    this._high.pause();
+    this._normal.pause();
   }
 
   /**
-   * Dynamically update batch size and flush interval.
-   * Use for network-quality adaptation — call when `navigator.connection.effectiveType` changes.
+   * Dynamically update the normal-lane batch size and flush interval.
+   * Critical and high lanes have fixed configs and are unaffected.
    */
   updateBatchConfig(batchSize: number, batchTimeoutMs: number): void {
-    this._exporter.updateBatchConfig(batchSize, batchTimeoutMs);
+    this._normal.updateBatchConfig(batchSize, batchTimeoutMs);
   }
 
   /**
-   * Synchronously drain all buffered events via `navigator.sendBeacon`.
-   * Call from a `pagehide` listener. No-ops when sendBeacon is unavailable
-   * (falls back to a best-effort async flush instead).
+   * Synchronously drain all lanes via `navigator.sendBeacon`.
+   * Drains critical first, then high, then normal so the most important
+   * events are packed into the earliest beacons.
+   * Call from a `pagehide` listener. Falls back to best-effort async flush
+   * when sendBeacon is unavailable.
    */
   drain(): void {
     const hasBeacon =
       typeof navigator !== 'undefined' &&
-      typeof (navigator as Navigator & { sendBeacon?: unknown }).sendBeacon ===
-        'function';
+      typeof (navigator as Navigator & { sendBeacon?: unknown }).sendBeacon === 'function';
 
     if (!hasBeacon) {
-      void this._exporter.flush().catch(() => {
-        /* best-effort */
-      });
+      void Promise.all([
+        this._critical.flush(),
+        this._high.flush(),
+        this._normal.flush(),
+      ]).catch(() => { /* best-effort */ });
       return;
     }
 
     const url = this._url;
-    this._exporter.drain({
-      encodeSync: (batch) => buildEnvelope(batch),
-      send: (data) => {
-        const type =
-          typeof data === 'string'
-            ? 'application/json'
-            : 'application/octet-stream';
-        (
-          navigator as Navigator & {
-            sendBeacon: (u: string, b: Blob) => boolean;
-          }
-        ).sendBeacon(url, new Blob([data as BlobPart], { type }));
+    const drainOpts = {
+      encodeSync: (batch: EventPayload[]) => buildEnvelope(batch),
+      send: (data: string | Uint8Array) => {
+        const type = typeof data === 'string' ? 'application/json' : 'application/octet-stream';
+        (navigator as Navigator & {
+          sendBeacon: (u: string, b: Blob) => boolean;
+        }).sendBeacon(url, new Blob([data as BlobPart], { type }));
       },
-    });
+    };
+
+    // Priority order: critical → high → normal.
+    this._critical.drain(drainOpts);
+    this._high.drain(drainOpts);
+    this._normal.drain(drainOpts);
   }
 
   async flush(): Promise<void> {
-    await this._exporter.flush();
+    await Promise.all([
+      this._critical.flush(),
+      this._high.flush(),
+      this._normal.flush(),
+    ]);
   }
 
   async close(): Promise<void> {
-    await this._exporter.close();
+    await Promise.all([
+      this._critical.close(),
+      this._high.close(),
+      this._normal.close(),
+    ]);
   }
 }
 
@@ -178,15 +247,14 @@ export function createClientTransport(opts: TransportOptions): Transport {
     url: opts.url,
     compress: opts.compress ?? true,
     batchSize: opts.batchSize ?? 20,
-    batchTimeoutMs: opts.batchTimeoutMs ?? 2_000,
+    batchTimeoutMs: opts.batchTimeoutMs ?? 5_000,
     maxBufferSize: opts.maxBufferSize ?? 500,
     headers: opts.headers,
-    retry: opts.retry ,
+    retry: opts.retry,
     fetch: opts.fetch,
     paused: opts.paused ?? true,
     onDropped: opts.onDropped,
     onBatchDelivered: opts.onBatchDelivered,
-    eventPriority: opts.eventPriority,
   });
 }
 

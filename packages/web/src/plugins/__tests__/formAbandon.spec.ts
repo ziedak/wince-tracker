@@ -30,7 +30,7 @@ describe('mountFormAbandon', () => {
     registeredHook!();
 
     expect(tracker.track).toHaveBeenCalledTimes(1);
-    expect(tracker.track).toHaveBeenCalledWith('$form_abandon', expect.objectContaining({ form_id: 'f1', fields_filled: expect.any(Array) }));
+    expect(tracker.track).toHaveBeenCalledWith('$form_abandon', expect.objectContaining({ form_id: 'f1', fields_filled: expect.any(Array) }), undefined, { priority: 'high' });
 
     cleanup();
   });

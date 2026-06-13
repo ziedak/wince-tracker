@@ -29,7 +29,11 @@ function getLabel(el: Element): string | undefined {
 export function mountClick(tracker: WinceClient): () => void {
   if (typeof document === 'undefined') return () => undefined;
 
-  return useClickCapture((data) => {
+  let _lastMoveAt = 0;
+  const onMouseMove = () => { _lastMoveAt = Date.now(); };
+  document.addEventListener('mousemove', onMouseMove, { passive: true });
+
+  const removeClickCapture = useClickCapture((data) => {
     const props: Record<string, unknown> = {
       tag:             data.tag,
       text:            data.text,
@@ -50,6 +54,16 @@ export function mountClick(tracker: WinceClient): () => void {
     const label = getLabel(data.target as Element);
     if (label) props['label'] = label;
 
+    if (_lastMoveAt > 0) {
+      const ms = Date.now() - _lastMoveAt;
+      if (ms >= 500) props['hesitation_ms'] = ms;
+    }
+
     tracker.track('$click', { ...props, $plugin_source: 'click' });
   });
+
+  return () => {
+    document.removeEventListener('mousemove', onMouseMove);
+    removeClickCapture();
+  };
 }

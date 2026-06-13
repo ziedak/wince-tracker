@@ -59,6 +59,8 @@ export function mountFormInteraction(
 
   // Track fields currently focused so we can compute dwell on blur.
   const active = new Map<HTMLInputElement, number>();
+  // Track focus/blur cycles per field for frustration detection.
+  const focusCycles = new Map<string, { count: number; lastValue: string }>();
   let _started = false;
 
   function onFocus(e: FocusEvent): void {
@@ -87,6 +89,13 @@ export function mountFormInteraction(
         $plugin_source: 'formInteraction',
       });
     }
+
+    // Frustration cycle: record focus count and snapshot value at focus time.
+    const fKey = fieldKey(input);
+    const cycle = focusCycles.get(fKey) ?? { count: 0, lastValue: input.value };
+    cycle.count++;
+    cycle.lastValue = input.value;
+    focusCycles.set(fKey, cycle);
   }
 
   function onBlur(e: FocusEvent): void {
@@ -105,6 +114,24 @@ export function mountFormInteraction(
       if (entered) props['dwell_ms'] = Date.now() - entered;
       tracker.track('$form_field_blurred', props);
     }
+
+    // Frustration: repeated focus-blur cycles with no value change.
+    const fKey = fieldKey(input);
+    const cycle = focusCycles.get(fKey);
+    if (cycle) {
+      if (input.value !== cycle.lastValue) {
+        // Value changed — successful fill, reset cycle.
+        cycle.count = 0;
+      } else if (cycle.count >= 3) {
+        tracker.track('$form_frustration', {
+          field_name: fKey,
+          field_type: input.type || 'text',
+          focus_blur_count: cycle.count,
+          $plugin_source: 'formInteraction',
+        });
+        cycle.count = 0;
+      }
+    }
   }
 
   document.addEventListener('focusin', onFocus);
@@ -114,5 +141,6 @@ export function mountFormInteraction(
     document.removeEventListener('focusin', onFocus);
     document.removeEventListener('focusout', onBlur);
     active.clear();
+    focusCycles.clear();
   };
 }
