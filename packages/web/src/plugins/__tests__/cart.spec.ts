@@ -1,11 +1,20 @@
 /** @jest-environment jsdom */
 import { mountCart } from '../cart';
+import type { WinceClient } from '../../client';
 
-function makeTracker() {
+// Partial mock that satisfies the structural requirements mountCart uses.
+// Cast to WinceClient so TypeScript is happy with the argument type while
+// still letting jest.Mock methods (mockClear, toHaveBeenCalledWith) be accessible.
+interface MockTracker {
+  track: jest.Mock;
+  addBeforeDrainHook: jest.Mock;
+}
+
+function makeTracker(): MockTracker & WinceClient {
   return {
     track: jest.fn(),
     addBeforeDrainHook: jest.fn(() => jest.fn()),
-  };
+  } as unknown as MockTracker & WinceClient;
 }
 
 describe('mountCart — basic forwarding', () => {
@@ -177,7 +186,7 @@ describe('mountCart — autoAbandon', () => {
         drainHook = fn;
         return jest.fn();
       }),
-    };
+    } as unknown as MockTracker & WinceClient;
 
     const cleanup = mountCart(tracker, { autoAbandon: true, abandonIdleMs: 30_000 });
 

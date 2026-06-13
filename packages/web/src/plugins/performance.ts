@@ -66,12 +66,13 @@ export function mountPerformance(tracker: WinceClient, options?: PerformanceOpti
   function tryObserve(
     type: string,
     cb: PerformanceObserverCallback,
-    init?: Partial<PerformanceObserverInit>,
+    init?: Record<string, unknown>,
   ): void {
     try {
       if (!PerformanceObserver.supportedEntryTypes?.includes(type)) return;
       const obs = new PerformanceObserver(cb);
-      obs.observe({ type, buffered: true, ...init });
+      // Cast to bypass TS DOM lib gaps (e.g. durationThreshold not yet typed).
+      obs.observe({ type, buffered: true, ...init } as PerformanceObserverInit);
       observers.push(obs);
     } catch {
       // Unsupported entry type in this browser — skip silently.
@@ -108,7 +109,8 @@ export function mountPerformance(tracker: WinceClient, options?: PerformanceOpti
     // interactionId and should not count toward INP.
     tryObserve('event', (list) => {
       for (const entry of list.getEntries()) {
-        const e = entry as PerformanceEventTiming;
+        // Cast to include interactionId (not yet typed in all TS DOM lib versions).
+        const e = entry as PerformanceEventTiming & { interactionId?: number };
         if (!e.interactionId) continue; // not a user interaction — skip
         const d = Math.round(e.duration);
         if (_inp === undefined || d > _inp) _inp = d;
