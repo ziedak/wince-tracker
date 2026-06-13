@@ -5,7 +5,7 @@ function patchCookie(value: string) {
   Object.defineProperty(document, 'cookie', {
     configurable: true,
     get: () => value,
-    set: jest.fn(),
+    set: () => undefined,
   });
 }
 
@@ -14,7 +14,7 @@ function restoreCookie() {
   Object.defineProperty(document, 'cookie', {
     configurable: true,
     get: () => '',
-    set: () => {},
+    set: () => undefined,
   });
 }
 

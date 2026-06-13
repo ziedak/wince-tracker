@@ -101,13 +101,13 @@ describe('Exporter — circuit breaker', () => {
     // Three failures to open the circuit. attempts=1 → no retry delays.
     for (let i = 0; i < 3; i++) {
       exp.enqueue({ id: i });
-      await exp.flush().catch(() => {});
+      await exp.flush().catch((error) => { void error; });
     }
 
     // CB is open — a 4th flush must retain the new item (not send or drop it).
     const sizeBefore = exp.queueSize;
     exp.enqueue({ id: 99 });
-    await exp.flush().catch(() => {});
+    await exp.flush().catch((error) => { void error; });
     expect(exp.queueSize).toBe(sizeBefore + 1);
     await exp.close();
   });
@@ -127,7 +127,7 @@ describe('Exporter — circuit breaker', () => {
 
       for (let i = 0; i < 3; i++) {
         exp.enqueue({ id: i });
-        await exp.flush().catch(() => {});
+        await exp.flush().catch((error) => { void error; });
       }
 
       expect(exp.queueSize).toBeGreaterThan(0);
@@ -172,7 +172,7 @@ describe('Exporter — retry', () => {
     });
     const exp = makeExporter(sender); // 4 attempts, 0 delay
     exp.enqueue({ id: 1 });
-    await exp.flush().catch(() => {});
+    await exp.flush().catch((error) => { void error; });
     // 4 attempts total (initial + 3 retries)
     expect(calls).toBe(4);
     await exp.close();

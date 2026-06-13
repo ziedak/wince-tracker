@@ -72,7 +72,7 @@ export async function compress(
       if (validateNativeGzip(out, u8)) return out;
       // else: fall through to JS fallback
     } catch (e) {
-      // eslint-disable-next-line no-console
+       
       console.warn(
         '[wince] compress: native CompressionStream failed, falling back to JS gzipSync',
         e,

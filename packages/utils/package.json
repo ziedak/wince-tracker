@@ -15,6 +15,9 @@
       "import": "./dist/index.esm.js",
       "default": "./dist/index.esm.js"
     }
+  },
+  "dependencies": {
+    "@nx/jest": "22.7.5"
   }
  
 }

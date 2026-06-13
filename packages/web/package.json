@@ -37,11 +37,11 @@
   },
   "dependencies": {
     "@wince/core": "workspace:*",
-    "@wince/utils": "workspace:*",
     "@wince/transport": "workspace:*",
-    "@wince/compress": "workspace:*",
     "@wince/consent": "workspace:*",
-    "@wince/storage": "workspace:*",
-    "@wince/cache": "workspace:*"
+    "@wince/cache": "workspace:*",
+    "@nx/jest": "22.7.5",
+    "fflate": "0.8.3",
+    "@wince/storage": "0.0.1"
   }
 }

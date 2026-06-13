@@ -17,6 +17,7 @@
   },
   "sideEffects": false,
   "dependencies": {
-    "fflate": "^0.8.3"
+    "fflate": "^0.8.3",
+    "@nx/jest": "22.7.5"
   }
 }

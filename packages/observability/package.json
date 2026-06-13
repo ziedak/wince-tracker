@@ -16,6 +16,7 @@
     }
   },
   "dependencies": {
-    "@wince/transport": "workspace:*"
+    "@wince/transport": "workspace:*",
+    "@nx/jest": "22.7.5"
   }
 }

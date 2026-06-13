@@ -71,7 +71,7 @@ describe('BatchQueue — pause / start', () => {
 
 describe('BatchQueue — drain()', () => {
   it('returns all buffered items and empties the buffer', () => {
-    const q = makeQueue(async () => {});
+    const q = makeQueue(async () => undefined);
     q.add(10);
     q.add(20);
     q.add(30);
@@ -81,7 +81,7 @@ describe('BatchQueue — drain()', () => {
   });
 
   it('returns empty array when buffer is empty', () => {
-    const q = makeQueue(async () => {});
+    const q = makeQueue(async () => undefined);
     expect(q.drain()).toEqual([]);
   });
 
@@ -139,7 +139,7 @@ describe('BatchQueue — maxBufferSize eviction', () => {
 
 describe('BatchQueue — size', () => {
   it('reflects current buffer depth', async () => {
-    const q = makeQueue(async () => {});
+    const q = makeQueue(async () => undefined);
     expect(q.size).toBe(0);
     q.add(1);
     q.add(2);

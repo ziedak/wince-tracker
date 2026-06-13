@@ -17,6 +17,7 @@
   },
   "sideEffects": false,
   "dependencies": {
-    "@wince/compress": "workspace:*"
+    "@wince/compress": "workspace:*",
+    "@nx/jest": "22.7.5"
   }
 }

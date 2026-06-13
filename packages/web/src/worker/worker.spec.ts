@@ -139,7 +139,7 @@ describe('WorkerClient — track()', () => {
       isGranted: () => false,
       isDenied:  () => false,
       isPending: () => true,
-      onChange:  () => () => {},
+      onChange:  () => () => {/**/},
     };
     new WorkerClient(
       { endpoint: 'https://x.test', consent: mockConsent, compress: false, fetch: makeFetch() },

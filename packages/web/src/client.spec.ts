@@ -212,12 +212,13 @@ describe('WinceClient — identify() / reset()', () => {
 describe('WinceClient — consent gating', () => {
   it('track() is a no-op when consent is PENDING', async () => {
     const fetchFn = makeFetch();
+    const noopUnsubscribe = () => undefined;
     const mockConsent = {
       getStatus:  () => -1 as const,
       isGranted:  () => false,
       isDenied:   () => false,
       isPending:  () => true,
-      onChange:   () => () => {},
+      onChange:   () => noopUnsubscribe,
     };
     const client = makeClient({ fetch: fetchFn, consent: mockConsent });
     client.track('ev');
@@ -230,12 +231,13 @@ describe('WinceClient — consent gating', () => {
     const fetchFn = makeFetch();
     let consentStatus = -1; // starts PENDING
     let consentCb: ((s: -1 | 0 | 1) => void) | undefined;
+    const noopUnsubscribe = () => undefined;
     const mockConsent = {
       getStatus:  () => consentStatus as -1 | 0 | 1,
       isGranted:  () => consentStatus === 1,
       isDenied:   () => consentStatus === 0,
       isPending:  () => consentStatus === -1,
-      onChange:   (cb: (s: -1 | 0 | 1) => void) => { consentCb = cb; return () => {}; },
+      onChange:   (cb: (s: -1 | 0 | 1) => void) => { consentCb = cb; return noopUnsubscribe; },
     };
     const client = makeClient({ fetch: fetchFn, consent: mockConsent });
 

@@ -28,5 +28,7 @@
       "default": "./dist/memory.esm.js"
     }
   },
-  "dependencies": {}
+  "dependencies": {
+    "@nx/jest": "22.7.5"
+  }
 }

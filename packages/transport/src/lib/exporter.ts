@@ -360,7 +360,7 @@ export class Exporter<T> {
     this._cbTimer = safeSetTimeout(() => {
       this._cbTimer = undefined;
       this._cbOpen = false; // close circuit — allow one probe flush through
-      void this._queue.flush().catch(() => {});
+      void this._queue.flush().catch((error) => { void error; });
     }, backoffMs);
   }
 

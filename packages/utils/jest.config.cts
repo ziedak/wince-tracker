@@ -1,4 +1,4 @@
-/* eslint-disable */
+ 
 const { readFileSync } = require('fs');
 const nxPreset = require('@nx/jest/preset').default;
 
