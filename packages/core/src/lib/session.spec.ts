@@ -5,9 +5,9 @@ function makeStore(): MinimalStore & { data: Record<string, string> } {
   const data: Record<string, string> = {};
   return {
     data,
-    get: (k) => data[k] ?? null,
-    set: (k, v) => { data[k] = v; },
-    delete: (k) => { delete data[k]; },
+    get: (k: string) => data[k] ?? null,
+    set: (k: string, v: string) => { data[k] = v; },
+    delete: (k: string) => { delete data[k]; },
   };
 }
 

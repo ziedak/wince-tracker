@@ -10,9 +10,9 @@ test('submits the lead form and preserves the submitted payload', async ({ page 
   await openPlayground(page);
   await page.getByRole('button', { name: 'Consent opt-in' }).click();
 
-  await page.getByLabel('Email').fill('buyer@example.com');
-  await page.getByLabel('Company').fill('Northwind');
-  await page.getByLabel('Phone').fill('+1 555 0100');
+  await page.locator('form#lead-form input[name="email"]').fill('buyer@example.com');
+  await page.locator('form#lead-form input[name="name"]').fill('Northwind');
+  await page.locator('form#lead-form input[name="tel"]').fill('+1 555 0100');
   await page.locator('form#lead-form textarea[name="notes"]').fill('Ready to buy');
   await page.getByRole('button', { name: 'Submit form' }).click();
 
@@ -20,9 +20,9 @@ test('submits the lead form and preserves the submitted payload', async ({ page 
   await expect(page.locator('[data-role="diag-events-queued"]')).not.toHaveText('—');
 
   await page.getByRole('button', { name: 'Reset form' }).click();
-  await expect(page.getByLabel('Email')).toHaveValue('');
-  await expect(page.getByLabel('Company')).toHaveValue('');
-  await expect(page.getByLabel('Phone')).toHaveValue('');
+  await expect(page.locator('form#lead-form input[name="email"]')).toHaveValue('');
+  await expect(page.locator('form#lead-form input[name="name"]')).toHaveValue('');
+  await expect(page.locator('form#lead-form input[name="tel"]')).toHaveValue('');
   await expect(page.locator('form#lead-form textarea[name="notes"]')).toHaveValue('');
 
   await expectNoDeadClick(page);

@@ -3,6 +3,7 @@
   "compilerOptions": {
     "allowJs": true,
     "outDir": "out-tsc/playwright",
+    "lib": ["es2022", "dom", "dom.iterable"],
     "sourceMap": false
   },
   "include": [

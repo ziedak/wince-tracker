@@ -28,5 +28,22 @@ export { mountExitIntent } from './plugins/exitIntent';
 export { mountFormInteraction } from './plugins/formInteraction';
 export type { FormInteractionOptions } from './plugins/formInteraction';
 
+// Visibility & behavioral signal plugins
+export { mountElementVisibility } from './plugins/elementVisibility';
+export type { ElementVisibilityOptions } from './plugins/elementVisibility';
+export { mountTabFocus } from './plugins/tabFocus';
+export { mountTextSelection } from './plugins/textSelection';
+export { mountNetworkQuality } from './plugins/networkQuality';
+
+// Form friction signal plugins
+export { mountValidationError } from './plugins/validationError';
+export { mountDoubleSubmit } from './plugins/doubleSubmit';
+export type { DoubleSubmitOptions } from './plugins/doubleSubmit';
+export { mountBacktrack } from './plugins/backtrack';
+
+// Intervention feedback loop
+export { mountIntervention } from './plugins/intervention';
+export type { InterventionTracker, InterventionEventProps } from './plugins/intervention';
+
 // Web Worker integration (enrichment + IDB persistence off main thread)
 export { WorkerClient, initWithWorker } from './worker/client';

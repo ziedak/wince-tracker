@@ -1,9 +1,24 @@
 import { defineConfig, devices } from '@playwright/test';
 import { nxE2EPreset } from '@nx/playwright/preset';
 import { workspaceRoot } from '@nx/devkit';
+import { execFileSync } from 'node:child_process';
 
 // For CI, you may want to set BASE_URL to the deployed application.
 const baseURL = process.env['BASE_URL'] || 'http://localhost:4300';
+
+function hasSharedLibrary(name: string): boolean {
+  try {
+    const output = execFileSync('ldconfig', ['-p'], { encoding: 'utf8' });
+    return output.includes(name);
+  } catch {
+    return false;
+  }
+}
+
+const hasWebkitDeps =
+  hasSharedLibrary('libmanette-0.2.so.0') &&
+  hasSharedLibrary('libenchant-2.so.2') &&
+  hasSharedLibrary('libwoff2dec.so.1.0.2');
 
 /**
  * Read environment variables from file.
@@ -40,10 +55,12 @@ export default defineConfig({
       use: { ...devices['Desktop Firefox'] },
     },
 
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
-    },
+    ...(hasWebkitDeps
+      ? [{
+          name: 'webkit',
+          use: { ...devices['Desktop Safari'] },
+        }]
+      : []),
 
     // Uncomment for mobile browsers support
     /* {

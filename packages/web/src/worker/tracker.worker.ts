@@ -256,15 +256,20 @@ const _pending:   MainToWorkerMsg[] = [];
   const msg = e.data;
 
   if (msg.type === 'init') {
+    let initSucceeded = true;
     try {
       await handleInit(msg.config);
     } catch (err) {
+      initSucceeded = false;
       const reply: WorkerToMainMsg = {
         type:    'error',
         message: `Worker init failed: ${(err as Error).message}`,
       };
       self.postMessage(reply);
     }
+
+    if (!initSucceeded) return;
+
     _initialized = true;
 
     // Notify the main thread of the stable anon/session IDs so it can include

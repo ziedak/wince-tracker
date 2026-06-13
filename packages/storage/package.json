@@ -20,8 +20,13 @@
       "types": "./dist/cookie.d.ts",
       "import": "./dist/cookie.esm.js",
       "default": "./dist/cookie.esm.js"
+    },
+    "./memory": {
+      "@wince/source": "./src/memory.ts",
+      "types": "./dist/memory.d.ts",
+      "import": "./dist/memory.esm.js",
+      "default": "./dist/memory.esm.js"
     }
   },
-  "dependencies": {
-  }
+  "dependencies": {}
 }

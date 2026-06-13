@@ -12,6 +12,7 @@ export const STORAGE_STRATEGIES: StoreKind[] = [
   'memory',
 ];
 export { BaseStorage } from './stores/BaseStorage';
+export  {type StoreKind} from './stores/MultiStorage';
 
 export const LocalStore = createMultiStore({ strategies: ['localStorage'] });
 export const SessionStore = createMultiStore({

@@ -42,6 +42,19 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
   const trackVisibility  = options?.trackVisibility  ?? true;
   const trackTimeOnPage  = options?.trackTimeOnPage  ?? true;
 
+  // Capture the Navigation Timing API entry once at mount — only meaningful for
+  // full-page loads; value is `undefined` in environments without Performance API.
+  const _navType = (typeof performance !== 'undefined' && typeof performance.getEntriesByType === 'function')
+    ? (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.type
+    : undefined;
+
+  function buildNavProps(): Record<string, unknown> {
+    if (!_navType) return {};
+    const p: Record<string, unknown> = { navigation_type: _navType };
+    if (_navType === 'back_forward') p['$session_resume'] = true;
+    return p;
+  }
+
   // ---------- scroll state ----------
   let _maxScrollPct     = 0;
   let _lastScrollPct    = 0;
@@ -126,7 +139,7 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
   let _pendingFirstPage = document.visibilityState !== 'visible';
 
   if (!_pendingFirstPage) {
-    tracker.page({ $plugin_source: 'pageView' });
+    tracker.page({ ...buildNavProps(), $plugin_source: 'pageView' });
     resetMetrics();
   }
 
@@ -227,7 +240,7 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
         if (_pendingFirstPage) {
           // Page was prerendered — fire the deferred first page view now.
           _pendingFirstPage = false;
-          tracker.page({ $plugin_source: 'pageView' });
+          tracker.page({ ...buildNavProps(), $plugin_source: 'pageView' });
           resetMetrics(); // starts fresh timers from this moment
           return;
         }
@@ -246,7 +259,7 @@ export function mountPageView(tracker: WinceClient, options?: PageViewOptions): 
       if (document.visibilityState !== 'visible') return;
       _pendingFirstPage = false;
       document.removeEventListener('visibilitychange', onceVisible);
-      tracker.page({ $plugin_source: 'pageView' });
+      tracker.page({ ...buildNavProps(), $plugin_source: 'pageView' });
       resetMetrics();
     };
     document.addEventListener('visibilitychange', onceVisible);

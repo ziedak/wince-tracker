@@ -9,13 +9,22 @@ import {
   mountClick,
   mountCopyPaste,
   mountDeadClick,
+  mountElementVisibility,
   mountErrorCapture,
   mountExitIntent,
   mountFormAbandon,
   mountFormInteraction,
   mountPageView,
   mountRageClick,
+  mountTabFocus,
+  mountTextSelection,
+  mountNetworkQuality,
+  mountValidationError,
+  mountDoubleSubmit,
+  mountBacktrack,
+  mountIntervention,
 } from '@wince/web';
+import type { InterventionTracker } from '@wince/web';
 
 type LogLevel = 'info' | 'event' | 'state' | 'error';
 
@@ -169,6 +178,7 @@ export class AppElement extends HTMLElement {
   // Without this, DNT silently forces DENIED and the cookie value is ignored.
   private readonly _consent = new ConsentManager({ ignoreDnt: true });
   private readonly _cleanup: Array<() => void> = [];
+  private _intervention: InterventionTracker | undefined;
   private readonly _runtimeEntries: LogEntry[] = [];
   private readonly _interceptEntries: InterceptEntry[] = [];
   private readonly _transportEntries: TransportBatchEntry[] = [];
@@ -214,6 +224,7 @@ export class AppElement extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._intervention?.destroy();
     for (const cleanup of this._cleanup.splice(0)) cleanup();
   }
 
@@ -309,26 +320,39 @@ export class AppElement extends HTMLElement {
       this._cleanup.push(() => form.removeEventListener('submit', onSubmit));
     }
 
+    const frictionForm = this.querySelector('#friction-form');
+    if (frictionForm instanceof HTMLFormElement) {
+      const onSubmit = (event: Event) => event.preventDefault();
+      frictionForm.addEventListener('submit', onSubmit);
+      this._cleanup.push(() => frictionForm.removeEventListener('submit', onSubmit));
+    }
+
     this.querySelectorAll('[data-action]').forEach((button) => {
       const handler = () => {
         const action = button.getAttribute('data-action');
         if (!action) return;
         const cartContext = readCartContext(this);
-        const cartAction =
-          action === 'add'
-            ? 'add'
-            : action === 'remove'
-              ? 'remove'
-              : action === 'checkout-start'
-                ? 'checkout_start'
-                : 'checkout_complete';
+
+        // Normalise hyphenated legacy values; new funnel actions already use underscores.
+        const LEGACY: Record<string, string> = {
+          'add':              'add',
+          'remove':           'remove',
+          'checkout-start':   'checkout_start',
+          'checkout-complete':'checkout_complete',
+        };
+        const cartAction = LEGACY[action] ?? action;
+
+        const extra: Record<string, unknown> = {};
+        if (action === 'checkout_step')  extra['step'] = 1;
+        if (action === 'purchase')       extra['revenue'] = Number(cartContext.price ?? 0);
+
         document.dispatchEvent(
           new CustomEvent('wince:cart', {
             detail: {
               action: cartAction,
               ...cartContext,
-              price:
-                action === 'remove' ? 0 : Number(cartContext.price ?? 49.99),
+              price: action === 'remove' ? 0 : Number(cartContext.price ?? 49.99),
+              ...extra,
             },
           }),
         );
@@ -414,9 +438,44 @@ export class AppElement extends HTMLElement {
       mountFormAbandon(this._client),
       mountFormInteraction(this._client),
       mountRageClick(this._client),
+      mountElementVisibility(this._client),
+      mountTabFocus(this._client),
+      mountTextSelection(this._client),
+      mountNetworkQuality(this._client),
+      mountValidationError(this._client),
+      mountDoubleSubmit(this._client),
+      mountBacktrack(this._client),
     ];
 
     for (const cleanup of cleanupFns) this._cleanup.push(cleanup);
+
+    // Intervention feedback tracker (returns object, not cleanup fn).
+    this._intervention = mountIntervention(this._client);
+
+    // Wire intervention demo buttons defined in index.html.
+    const interventionProps = () => ({
+      intervention_id:   `inv-demo-${Date.now()}`,
+      intervention_type: 'popup',
+      channel:           'in_page',
+      trigger_reason:    'manual',
+      variant_id:        'demo-variant',
+      confidence_score:  0.9,
+    });
+
+    const interventionBtns: Array<[string, () => void]> = [
+      ['[data-role="intervention-shown"]',     () => { this._intervention?.shown(interventionProps());     this._record('state', 'intervention', 'shown'); }],
+      ['[data-role="intervention-dismissed"]', () => { this._intervention?.dismissed(interventionProps()); this._record('state', 'intervention', 'dismissed'); }],
+      ['[data-role="intervention-clicked"]',   () => { this._intervention?.clicked(interventionProps());   this._record('state', 'intervention', 'clicked'); }],
+      ['[data-role="intervention-accepted"]',  () => { this._intervention?.accepted(interventionProps());  this._record('state', 'intervention', 'accepted'); }],
+      ['[data-role="intervention-ignored"]',   () => { this._intervention?.ignored(interventionProps());   this._record('state', 'intervention', 'ignored'); }],
+    ];
+
+    for (const [sel, handler] of interventionBtns) {
+      const btn = this.querySelector(sel);
+      if (!btn) continue;
+      btn.addEventListener('click', handler);
+      this._cleanup.push(() => btn.removeEventListener('click', handler));
+    }
   }
 
   private refreshConsentState() {

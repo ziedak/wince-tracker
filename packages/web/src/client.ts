@@ -11,15 +11,16 @@ import {
   type PersonProps,
   type MinimalStore,
 } from '@wince/core';
-import { createStore, type IStore, type StoreKind } from '@wince/storage';
+import { createStore, type IStore } from '@wince/storage';
 import type { ConsentProvider } from '@wince/consent';
 import { wireConsent } from './lib/consentWire';
 import { buildBaseDiagnostics } from './lib/diagnostics';
 import { fetchEnrichment } from './lib/enrichment';
 import { applyEnrichmentOnceToEvents } from './lib/preEnrich';
 import { BaseClient } from './lib/baseClient';
-import { mountPageView, PageViewOptions } from './plugins/pageView';
+import { mountPageView } from './plugins/pageView';
 import { mountClick } from './plugins/click';
+import { StoreKind } from '@wince/storage';
 
 // ---------------------------------------------------------------------------
 // Adapter: IStore (unknown-typed get) → MinimalStore (string | null get)

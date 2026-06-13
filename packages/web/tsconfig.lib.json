@@ -18,9 +18,6 @@
       "path": "../cache/tsconfig.lib.json"
     },
     {
-      "path": "../storage/tsconfig.lib.json"
-    },
-    {
       "path": "../consent/tsconfig.lib.json"
     },
     {

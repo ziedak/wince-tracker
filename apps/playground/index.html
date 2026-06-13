@@ -130,6 +130,96 @@
               <button type="button" data-role="opt-out">Consent opt-out</button>
             </section>
 
+            <!-- ============================================================
+                 Funnel events (product_view / view_cart / checkout_step etc.)
+                 ============================================================ -->
+            <section class="control-row panel inset">
+              <div class="section-head compact">
+                <h3>Funnel signals</h3>
+                <p>Fire cart funnel events to simulate a product → cart → checkout flow.</p>
+              </div>
+              <div class="actions">
+                <button type="button" data-action="product_view" data-track-label="View product">View product</button>
+                <button type="button" data-action="view_cart" data-track-label="View cart">View cart</button>
+                <button type="button" data-action="checkout_step" data-track-label="Checkout step 1">Checkout step</button>
+                <button type="button" data-action="checkout_abandon" data-track-label="Abandon checkout">Abandon checkout</button>
+                <button type="button" data-action="purchase" data-track-label="Purchase">Purchase</button>
+              </div>
+            </section>
+
+            <!-- ============================================================
+                 Element visibility — data-track-visible elements
+                 ============================================================ -->
+            <section class="panel inset" data-role="visibility-surface">
+              <div class="section-head compact">
+                <h3>Visibility tracking</h3>
+                <p>Scroll down to bring these elements into view. Each emits <code>$element_visible</code> after 1 s of exposure.</p>
+              </div>
+              <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+                <article
+                  data-track-visible="product-hero"
+                  style="padding:1.5rem;background:var(--surface-2,#f4f4f5);border-radius:8px;min-width:200px;flex:1;"
+                >
+                  <strong>Product hero</strong>
+                  <p style="margin:0;font-size:.875rem;">data-track-visible="product-hero"</p>
+                </article>
+                <article
+                  data-track-visible="discount-banner"
+                  style="padding:1.5rem;background:var(--surface-2,#f4f4f5);border-radius:8px;min-width:200px;flex:1;"
+                >
+                  <strong>Discount banner</strong>
+                  <p style="margin:0;font-size:.875rem;">data-track-visible="discount-banner"</p>
+                </article>
+                <article
+                  data-track-visible="social-proof"
+                  style="padding:1.5rem;background:var(--surface-2,#f4f4f5);border-radius:8px;min-width:200px;flex:1;"
+                >
+                  <strong>Social proof</strong>
+                  <p style="margin:0;font-size:.875rem;">data-track-visible="social-proof"</p>
+                </article>
+              </div>
+            </section>
+
+            <!-- ============================================================
+                 Friction signals — validation errors, double submit
+                 ============================================================ -->
+            <section class="panel inset" data-role="friction-surface">
+              <div class="section-head compact">
+                <h3>Friction signals</h3>
+                <p>Submit the form without filling required fields to trigger <code>$validation_error</code>. Click submit twice quickly for <code>$double_submit</code>.</p>
+              </div>
+              <form id="friction-form" class="form-card" novalidate>
+                <label>
+                  Email (required)
+                  <input name="friction-email" type="email" required placeholder="you@example.com" autocomplete="email" />
+                </label>
+                <label>
+                  Phone (required)
+                  <input name="friction-phone" type="tel" required placeholder="+1 555 0100" autocomplete="tel" />
+                </label>
+                <div class="actions">
+                  <button type="submit" data-track-label="Friction form submit">Submit</button>
+                </div>
+              </form>
+            </section>
+
+            <!-- ============================================================
+                 Intervention feedback loop
+                 ============================================================ -->
+            <section class="panel inset" data-role="intervention-surface">
+              <div class="section-head compact">
+                <h3>Intervention feedback</h3>
+                <p>Simulate the intervention lifecycle. Each button fires the corresponding event into the tracker so the AI model can close its training loop.</p>
+              </div>
+              <div class="actions" style="flex-wrap:wrap;gap:.5rem;">
+                <button type="button" data-role="intervention-shown"     data-track-label="Intervention shown">Shown</button>
+                <button type="button" data-role="intervention-clicked"   data-track-label="Intervention clicked">Clicked</button>
+                <button type="button" data-role="intervention-accepted"  data-track-label="Intervention accepted">Accepted</button>
+                <button type="button" data-role="intervention-dismissed" data-track-label="Intervention dismissed">Dismissed</button>
+                <button type="button" data-role="intervention-ignored"   data-track-label="Intervention ignored">Ignored</button>
+              </div>
+            </section>
+
             <section class="native-panel panel inset" data-role="native-surface">
               <div class="section-head compact">
                 <h3>Native event lab</h3>
