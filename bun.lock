@@ -73,11 +73,15 @@
     "packages/cache": {
       "name": "@wince/cache",
       "version": "0.0.1",
+      "dependencies": {
+        "@nx/jest": "22.7.5",
+      },
     },
     "packages/compress": {
       "name": "@wince/compress",
       "version": "0.0.1",
       "dependencies": {
+        "@nx/jest": "22.7.5",
         "fflate": "^0.8.3",
       },
     },
@@ -85,6 +89,7 @@
       "name": "@wince/consent",
       "version": "0.0.1",
       "dependencies": {
+        "@nx/jest": "22.7.5",
         "@wince/storage": "workspace:*",
       },
     },
@@ -92,42 +97,50 @@
       "name": "@wince/core",
       "version": "0.0.1",
       "dependencies": {
-        "@wince/utils": "workspace:*",
+        "@nx/jest": "22.7.5",
       },
     },
     "packages/observability": {
       "name": "@wince/observability",
       "version": "0.0.1",
       "dependencies": {
+        "@nx/jest": "22.7.5",
         "@wince/transport": "workspace:*",
       },
     },
     "packages/storage": {
       "name": "@wince/storage",
       "version": "0.0.1",
+      "dependencies": {
+        "@nx/jest": "22.7.5",
+      },
     },
     "packages/transport": {
       "name": "@wince/transport",
       "version": "0.0.1",
       "dependencies": {
+        "@nx/jest": "22.7.5",
         "@wince/compress": "workspace:*",
       },
     },
     "packages/utils": {
       "name": "@wince/utils",
       "version": "0.0.1",
+      "dependencies": {
+        "@nx/jest": "22.7.5",
+      },
     },
     "packages/web": {
       "name": "@wince/web",
       "version": "0.0.1",
       "dependencies": {
+        "@nx/jest": "22.7.5",
         "@wince/cache": "workspace:*",
-        "@wince/compress": "workspace:*",
         "@wince/consent": "workspace:*",
         "@wince/core": "workspace:*",
-        "@wince/storage": "workspace:*",
+        "@wince/storage": "0.0.1",
         "@wince/transport": "workspace:*",
-        "@wince/utils": "workspace:*",
+        "fflate": "0.8.3",
       },
       "devDependencies": {
         "rollup-plugin-visualizer": "^6.0.3",

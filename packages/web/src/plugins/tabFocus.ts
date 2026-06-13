@@ -1,43 +1,136 @@
 import type { WinceClient } from '../client';
 
+export interface TabFocusOptions {
+  /**
+   * Time window in ms to accumulate blur/focus transitions before emitting
+   * a rollup event. Set to 0 to emit individual events on every transition
+   * (legacy behaviour). Default: 60_000 (1 minute).
+   */
+  rollupIntervalMs?: number;
+}
+
 /**
  * Tab blur/focus plugin.
  *
- * Emits `$tab_blur` when the user switches away from the tab and `$tab_focus`
- * when they return, along with how long they were away.
+ * Aggregates visibility changes over a rolling time window and emits a single
+ * `$tab_focus_rollup` event at the end of each window (or on `pagehide`),
+ * reporting how many times the user switched away, total time away, and
+ * total time focused — rather than spamming one event per transition.
  *
- * Key intervention trigger: a user returning to the page after leaving is a
- * re-engagement signal — ideal timing for a recovery popup or chat nudge.
+ * For high-tabbers (users opening 10+ tabs) this prevents runaway event
+ * volume while preserving the signal the AI model needs.
  *
- * @returns A cleanup function that removes the visibilitychange listener.
+ * Set `rollupIntervalMs: 0` to revert to the original per-transition events
+ * (`$tab_blur` / `$tab_focus`) for debugging or low-traffic use.
+ *
+ * @returns A cleanup function that removes all event listeners.
  */
-export function mountTabFocus(tracker: WinceClient): () => void {
+export function mountTabFocus(tracker: WinceClient, options?: TabFocusOptions): () => void {
   if (typeof document === 'undefined') return () => undefined;
 
-  let blurredAt: number | undefined;
-  let isBlurred = false;
+  const rollupMs = options?.rollupIntervalMs ?? 60_000;
 
-  const handler = () => {
-    if (document.hidden) {
-      if (isBlurred) return;
-      isBlurred = true;
-      blurredAt = Date.now();
-      tracker.track('$tab_blur', { $plugin_source: 'tabFocus' });
+  // ── Legacy per-transition mode ─────────────────────────────────────────────
+  if (rollupMs === 0) {
+    let blurredAt: number | undefined;
+    let isBlurred = false;
+
+    const handler = () => {
+      if (document.hidden) {
+        if (isBlurred) return;
+        isBlurred = true;
+        blurredAt = Date.now();
+        tracker.track('$tab_blur', { $plugin_source: 'tabFocus' });
+        return;
+      }
+      if (!isBlurred) return;
+      const props: Record<string, unknown> = { $plugin_source: 'tabFocus' };
+      if (blurredAt !== undefined) props['away_duration_ms'] = Date.now() - blurredAt;
+      blurredAt = undefined;
+      isBlurred = false;
+      tracker.track('$tab_focus', props);
+    };
+
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  }
+
+  // ── Rollup mode ────────────────────────────────────────────────────────────
+  // Accumulators for the current window.
+  let _blurCount    = 0;
+  let _awayMs       = 0;
+  let _focusedMs    = 0;
+  let _blurredAt    = document.hidden ? Date.now() : 0;  // non-zero if currently hidden
+  let _windowStart  = Date.now();
+  let _rollupTimer: ReturnType<typeof setInterval> | undefined;
+
+  function flush(reason: 'interval' | 'pagehide'): void {
+    // Snapshot any in-progress blur/focus period before emitting.
+    const now = Date.now();
+    if (_blurredAt > 0) {
+      _awayMs    += now - _blurredAt;
+      _blurredAt  = now;  // keep tracking — not resetting (still hidden)
+    } else {
+      _focusedMs += now - _windowStart;
+    }
+
+    if (_blurCount === 0 && reason === 'interval') {
+      // Nothing happened this window — skip the event entirely.
+      _windowStart = now;
+      _focusedMs   = 0;
       return;
     }
 
-    if (!isBlurred) return;
+    tracker.track('$tab_focus_rollup', {
+      blur_count:      _blurCount,
+      away_ms:         _awayMs,
+      focused_ms:      _focusedMs,
+      window_ms:       now - _windowStart,
+      reason,
+      $plugin_source:  'tabFocus',
+    });
 
-    const props: Record<string, unknown> = { $plugin_source: 'tabFocus' };
-    if (blurredAt !== undefined) {
-      props['away_duration_ms'] = Date.now() - blurredAt;
+    // Reset accumulators for the next window.
+    _blurCount   = 0;
+    _awayMs      = 0;
+    _focusedMs   = 0;
+    _windowStart = now;
+  }
+
+  const onVisibilityChange = () => {
+    const now = Date.now();
+    if (document.hidden) {
+      // Transitioned to hidden — record focused time up to now.
+      _focusedMs += now - (_blurredAt > 0 ? _windowStart : _windowStart);
+      _blurCount++;
+      _blurredAt = now;
+    } else {
+      // Transitioned to visible — tally away time.
+      if (_blurredAt > 0) {
+        _awayMs   += now - _blurredAt;
+        _blurredAt = 0;
+      }
     }
-    blurredAt = undefined;
-    isBlurred = false;
-    tracker.track('$tab_focus', props);
   };
 
-  document.addEventListener('visibilitychange', handler);
+  const onPageHide = () => {
+    flush('pagehide');
+    if (_rollupTimer !== undefined) {
+      clearInterval(_rollupTimer);
+      _rollupTimer = undefined;
+    }
+  };
 
-  return () => document.removeEventListener('visibilitychange', handler);
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  window.addEventListener('pagehide', onPageHide);
+  _rollupTimer = setInterval(() => flush('interval'), rollupMs);
+
+  return () => {
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    window.removeEventListener('pagehide', onPageHide);
+    if (_rollupTimer !== undefined) {
+      clearInterval(_rollupTimer);
+      _rollupTimer = undefined;
+    }
+  };
 }

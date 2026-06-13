@@ -17,6 +17,8 @@
     }
   },
   "dependencies": {
-    "@nx/jest": "22.7.5"
+    "@nx/jest": "22.7.5",
+    "@wince/storage": "workspace:*"
+   
   }
 }

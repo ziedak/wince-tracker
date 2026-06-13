@@ -32,6 +32,7 @@ export type { FormInteractionOptions } from './plugins/formInteraction';
 export { mountElementVisibility } from './plugins/elementVisibility';
 export type { ElementVisibilityOptions } from './plugins/elementVisibility';
 export { mountTabFocus } from './plugins/tabFocus';
+export type { TabFocusOptions } from './plugins/tabFocus';
 export { mountTabIdle } from './plugins/tabIdle';
 export type { TabIdleOptions } from './plugins/tabIdle';
 export { mountTextSelection } from './plugins/textSelection';

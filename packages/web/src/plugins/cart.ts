@@ -29,7 +29,10 @@ export interface CartEventDetail {
     | 'product_view'
     | 'checkout_step'
     | 'checkout_abandon'
-    | 'purchase';
+    | 'purchase'
+    | 'option_selected'
+    | 'coupon_applied'
+    | 'coupon_failed';
   product_id?: string;
   name?: string;
   variant_id?: string;
@@ -55,13 +58,21 @@ export interface CartEventDetail {
   step?: number;
   /** Human-readable step label — e.g. `'shipping'`, `'payment'`. */
   step_name?: string;
+  /** Option name — used with `option_selected`. e.g. `'color'`, `'size'`. */
+  option_name?: string;
+  /** Option value — used with `option_selected`. e.g. `'red'`, `'XL'`. */
+  option_value?: string;
+  /** Coupon code attempted — used with `coupon_applied` and `coupon_failed`. */
+  code_attempted?: string;
+  /** Rejection reason — used with `coupon_failed`. e.g. `'expired'`, `'invalid'`. */
+  failure_reason?: string;
   /** Any additional properties are forwarded as-is. */
   [key: string]: unknown;
 }
 
 // Actions where data loss is costly — routed to the high-priority lane.
 const HIGH_PRIORITY_ACTIONS = new Set<string>([
-  'add', 'remove', 'purchase', 'checkout_complete',
+  'add', 'remove', 'purchase', 'checkout_complete', 'coupon_applied', 'coupon_failed',
 ]);
 
 // Actions that mark the start/continuation of checkout — arm the abandon timer.
@@ -116,6 +127,7 @@ export interface CartOptions {
 const KNOWN_ACTIONS = new Set<string>([
   'add', 'remove', 'update', 'checkout_start', 'checkout_complete',
   'view_cart', 'product_view', 'checkout_step', 'checkout_abandon', 'purchase',
+  'option_selected', 'coupon_applied', 'coupon_failed',
 ]);
 
 export function mountCart(tracker: WinceClient, options?: CartOptions): () => void {
