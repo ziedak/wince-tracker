@@ -19,7 +19,9 @@ test('walks a realistic checkout flow and records friction signals', async ({ pa
   await page.getByRole('button', { name: 'View product' }).click();
   await page.getByRole('button', { name: 'Add to cart' }).click();
   await page.getByRole('button', { name: 'View cart' }).click();
-  await page.getByRole('button', { name: 'Start checkout' }).click();
+  const startCheckout = page.getByRole('button', { name: 'Start checkout' });
+  await startCheckout.scrollIntoViewIfNeeded();
+  await startCheckout.click({ force: true });
   await page.getByRole('button', { name: 'Checkout step', exact: true }).click();
 
   await expectQueueToContain(

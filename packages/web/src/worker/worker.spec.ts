@@ -262,6 +262,10 @@ describe('WorkerClient — identify() / reset()', () => {
 // ---------------------------------------------------------------------------
 
 describe('initWithWorker — fallback', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('returns a WinceClient when Worker is unavailable', () => {
     // Temporarily remove Worker from global scope
     const origWorker = (globalThis as Record<string, unknown>).Worker;
@@ -272,6 +276,27 @@ describe('initWithWorker — fallback', () => {
 
     (globalThis as Record<string, unknown>).Worker = origWorker;
     (result as WinceClient).close();
+  });
+
+  it('creates a WorkerClient when Worker is available', () => {
+    const origWorker = (globalThis as Record<string, unknown>).Worker;
+    const workerInstance = new MockWorker();
+    const workerCtor = jest.fn().mockImplementation(() => workerInstance as unknown as Worker);
+    (globalThis as Record<string, unknown>).Worker = workerCtor as unknown as typeof Worker;
+
+    try {
+      const result = initWithWorker(
+        { endpoint: 'https://x.test', consent: null, compress: false, fetch: makeFetch() },
+        './tracker.worker.js',
+      );
+
+      expect(result).toBeInstanceOf(WorkerClient);
+      expect(workerCtor).toHaveBeenCalledTimes(1);
+      expect(workerCtor.mock.calls[0][0]).toBeInstanceOf(URL);
+      expect((workerCtor.mock.calls[0][0] as URL).href).toContain('tracker.worker.js');
+    } finally {
+      (globalThis as Record<string, unknown>).Worker = origWorker;
+    }
   });
 
   it('returns a WinceClient when Worker constructor throws', () => {

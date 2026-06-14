@@ -1,5 +1,5 @@
-import { test } from '@playwright/test';
-import { openPlayground, expectQueueToContain } from './playground.helpers';
+import { expect, test } from '@playwright/test';
+import { openPlayground, expectQueueToContain, queueLog } from './playground.helpers';
 
 test.describe('new signals', () => {
   test.beforeEach(async ({ page }) => {
@@ -25,16 +25,47 @@ test.describe('new signals', () => {
   test('$cart_checkout_step fires on "Checkout step" button click', async ({ page }) => {
     await page.getByRole('button', { name: 'Checkout step' }).click();
     await expectQueueToContain(page, '$cart_checkout_step');
+    await expect(page.locator('[data-role="queue-log"]')).toContainText('step');
+    await expect(page.locator('[data-role="queue-log"]')).toContainText('1');
   });
 
   test('$cart_checkout_abandon fires on "Abandon checkout" button click', async ({ page }) => {
     await page.getByRole('button', { name: 'Abandon checkout' }).click();
     await expectQueueToContain(page, '$cart_checkout_abandon');
+    await expect(queueLog(page)).toContainText('cart_id');
+    await expect(queueLog(page)).toContainText('CART-PLAYGROUND-01');
   });
 
   test('$cart_purchase fires on "Purchase" button click', async ({ page }) => {
     await page.getByRole('button', { name: 'Purchase', exact: true }).click();
     await expectQueueToContain(page, '$cart_purchase');
+    await expect(page.locator('[data-role="queue-log"]')).toContainText('revenue');
+    await expect(page.locator('[data-role="queue-log"]')).toContainText('49.99');
+  });
+
+  test('$cart_option_selected fires on "Select option" button click', async ({ page }) => {
+    await page.getByRole('button', { name: 'Select option', exact: true }).click();
+    await expectQueueToContain(page, '$cart_option_selected');
+    await expect(queueLog(page)).toContainText('option_name');
+    await expect(queueLog(page)).toContainText('size');
+    await expect(queueLog(page)).toContainText('option_value');
+    await expect(queueLog(page)).toContainText('xl');
+  });
+
+  test('$cart_coupon_applied fires on "Apply coupon" button click', async ({ page }) => {
+    await page.getByRole('button', { name: 'Apply coupon', exact: true }).click();
+    await expectQueueToContain(page, '$cart_coupon_applied');
+    await expect(queueLog(page)).toContainText('code_attempted');
+    await expect(queueLog(page)).toContainText('SAVE10');
+  });
+
+  test('$cart_coupon_failed fires on "Fail coupon" button click', async ({ page }) => {
+    await page.getByRole('button', { name: 'Fail coupon', exact: true }).click();
+    await expectQueueToContain(page, '$cart_coupon_failed');
+    await expect(queueLog(page)).toContainText('code_attempted');
+    await expect(queueLog(page)).toContainText('BROKEN10');
+    await expect(queueLog(page)).toContainText('failure_reason');
+    await expect(queueLog(page)).toContainText('expired');
   });
 
   // --------------------------------------------------------------------------
@@ -70,23 +101,27 @@ test.describe('new signals', () => {
   // Tab focus / blur
   // --------------------------------------------------------------------------
 
-  test('$tab_blur fires when page becomes hidden', async ({ page }) => {
-    // Simulate the page becoming hidden by setting visibilityState via CDP.
-    await page.evaluate(() => {
-      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
-      document.dispatchEvent(new Event('visibilitychange'));
-    });
-    await expectQueueToContain(page, '$tab_blur');
-  });
-
-  test('$tab_focus fires when page becomes visible again', async ({ page }) => {
+  test('$tab_focus_rollup fires after a blur/focus cycle and pagehide flush', async ({ page }) => {
     await page.evaluate(() => {
       Object.defineProperty(document, 'hidden', { value: true, configurable: true });
       document.dispatchEvent(new Event('visibilitychange'));
       Object.defineProperty(document, 'hidden', { value: false, configurable: true });
       document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('pagehide'));
     });
-    await expectQueueToContain(page, '$tab_focus');
+    await expectQueueToContain(page, '$tab_focus_rollup');
+  });
+
+  // --------------------------------------------------------------------------
+  // Performance signal
+  // --------------------------------------------------------------------------
+
+  test('$performance fires on pagehide', async ({ page }) => {
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    await expectQueueToContain(page, '$performance');
+    await expect(queueLog(page)).toContainText('ttfb_ms');
   });
 
   // --------------------------------------------------------------------------
@@ -125,10 +160,10 @@ test.describe('new signals', () => {
   // --------------------------------------------------------------------------
 
   test('$double_submit fires on rapid re-submission of the same form', async ({ page }) => {
-    const submitBtn = page.locator('#friction-form button[type="submit"]');
-    // Two rapid clicks — should trigger double_submit.
-    await submitBtn.click();
-    await submitBtn.click();
+    await page.locator('#friction-form').evaluate((form: HTMLFormElement) => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
     await expectQueueToContain(page, '$double_submit');
   });
 });

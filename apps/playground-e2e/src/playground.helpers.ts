@@ -1,7 +1,12 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
-export async function openPlayground(page: Page): Promise<void> {
-  await page.goto('/');
+export interface OpenPlaygroundOptions {
+  path?: string;
+  referer?: string;
+}
+
+export async function openPlayground(page: Page, options?: OpenPlaygroundOptions): Promise<void> {
+  await page.goto(options?.path ?? '/', options?.referer ? { referer: options.referer } : undefined);
 
   await expect(
     page.getByRole('heading', { name: 'Cart recovery event lab' }),

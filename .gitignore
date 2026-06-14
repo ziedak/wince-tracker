@@ -69,3 +69,4 @@ sandbox/vendor/
 .agents/skills/
 
 vite.config.*.timestamp*
+coverage/

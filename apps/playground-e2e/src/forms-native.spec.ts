@@ -3,6 +3,7 @@ import {
   expectQueueToContain,
   expectNoDeadClick,
   expectRuntimeToContain,
+  queueLog,
   openPlayground,
 } from './playground.helpers';
 
@@ -62,6 +63,27 @@ test('updates consent diagnostics when toggled', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Consent opt-out' }).click();
   await expect(page.locator('[data-role="consent-state"]')).toHaveText('Denied');
+
+  await expectNoDeadClick(page);
+});
+
+test('fires form_frustration after repeated blur/focus cycles without value changes', async ({ page }) => {
+  await openPlayground(page);
+  await page.getByRole('button', { name: 'Consent opt-in' }).click();
+
+  const email = page.locator('form#lead-form input[name="email"]');
+  const name = page.locator('form#lead-form input[name="name"]');
+
+  await email.focus();
+  await name.focus();
+  await email.focus();
+  await name.focus();
+  await email.focus();
+  await name.focus();
+
+  await expectQueueToContain(page, '$form_frustration');
+  await expect(queueLog(page)).toContainText('focus_blur_count');
+  await expect(queueLog(page)).toContainText('email');
 
   await expectNoDeadClick(page);
 });

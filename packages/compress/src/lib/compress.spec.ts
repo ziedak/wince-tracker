@@ -6,6 +6,34 @@ describe('compress', () => {
     expect(out).toBeInstanceOf(Uint8Array);
     expect(out.length).toBeGreaterThan(0);
   });
+
+  it('falls back when native compression is present but fails', async () => {
+    const originalCompressionStream = (globalThis as Record<string, unknown>).CompressionStream;
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    class ThrowingCompressionStream {
+      constructor() {
+        throw new Error('boom');
+      }
+    }
+
+    Object.defineProperty(globalThis, 'CompressionStream', {
+      value: ThrowingCompressionStream,
+      configurable: true,
+    });
+
+    try {
+      const out = await compress('native-fallback');
+      expect(new TextDecoder().decode(decompressSync(out))).toBe('native-fallback');
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      Object.defineProperty(globalThis, 'CompressionStream', {
+        value: originalCompressionStream,
+        configurable: true,
+      });
+    }
+  });
 });
 
 describe('compressSync', () => {
@@ -25,6 +53,23 @@ describe('compressSync', () => {
     const input = new TextEncoder().encode('hello');
     const out = compressSync(input);
     expect(out).toBeInstanceOf(Uint8Array);
+  });
+
+  it('accepts an ArrayBuffer', () => {
+    const input = new TextEncoder().encode('buffer input').buffer;
+    const out = compressSync(input);
+    expect(new TextDecoder().decode(decompressSync(out))).toBe('buffer input');
+  });
+
+  it('accepts a typed array view', () => {
+    const bytes = new TextEncoder().encode('view input');
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const out = compressSync(view as unknown as ArrayBuffer);
+    expect(new TextDecoder().decode(decompressSync(out))).toBe('view input');
+  });
+
+  it('rejects unsupported input types', () => {
+    expect(() => compressSync({} as ArrayBuffer)).toThrow(TypeError);
   });
 
   it('round-trips with decompressSync', () => {

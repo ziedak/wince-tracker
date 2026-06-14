@@ -23,6 +23,7 @@ import {
   mountDoubleSubmit,
   mountBacktrack,
   mountIntervention,
+  mountPerformance,
 } from '@wince/web';
 import type { InterventionTracker } from '@wince/web';
 
@@ -345,6 +346,17 @@ export class AppElement extends HTMLElement {
         const extra: Record<string, unknown> = {};
         if (action === 'checkout_step')  extra['step'] = 1;
         if (action === 'purchase')       extra['revenue'] = Number(cartContext.price ?? 0);
+        if (action === 'option_selected') {
+          extra['option_name'] = 'size';
+          extra['option_value'] = 'xl';
+        }
+        if (action === 'coupon_applied') {
+          extra['code_attempted'] = 'SAVE10';
+        }
+        if (action === 'coupon_failed') {
+          extra['code_attempted'] = 'BROKEN10';
+          extra['failure_reason'] = 'expired';
+        }
 
         document.dispatchEvent(
           new CustomEvent('wince:cart', {
@@ -445,6 +457,7 @@ export class AppElement extends HTMLElement {
       mountValidationError(this._client),
       mountDoubleSubmit(this._client),
       mountBacktrack(this._client),
+      mountPerformance(this._client),
     ];
 
     for (const cleanup of cleanupFns) this._cleanup.push(cleanup);

@@ -14,7 +14,7 @@ module.exports = {
   ...nxPreset,
   displayName: '@wince/web',
 
-  testEnvironment: 'jsdom',
+  testEnvironment: 'jest-environment-jsdom',
   setupFiles: ['<rootDir>/jest.setup.js'],
   transform: {
     '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig],

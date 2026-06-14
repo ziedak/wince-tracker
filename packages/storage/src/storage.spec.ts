@@ -1,9 +1,78 @@
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 
+import { BaseStorage } from './stores/BaseStorage';
 import { DurableQueue, PersistedEvent } from './DurableQueue';
-import { createMultiStore, CookieStore, LocalStore, SessionStore, MemoryStore, IStore } from './index';
-import { getRootDomain, resetRootDomainCache } from './stores/CookieStore';
+import { createMultiStore } from './stores/MultiStorage';
+import { CookieStore as CookieStoreClass, getRootDomain, resetRootDomainCache } from './stores/CookieStore';
+import type { IStore } from './stores/BaseStorage';
+
+function createStorageMock(): Storage {
+  const data = new Map<string, string>();
+
+  return {
+    get length() {
+      return data.size;
+    },
+    clear: () => {
+      data.clear();
+    },
+    getItem: (key: string) => data.get(key) ?? null,
+    key: (index: number) => Array.from(data.keys())[index] ?? null,
+    removeItem: (key: string) => {
+      data.delete(key);
+    },
+    setItem: (key: string, value: string) => {
+      data.set(key, value);
+    },
+  } as Storage;
+}
+
+function installCookieEnvironment(options: { hostname?: string; protocol?: string; acceptedDomain?: string } = {}) {
+  const cookieJar = new Map<string, string>();
+  const documentObject = globalThis.document as Document | undefined;
+  const originalCookieDescriptor = documentObject
+    ? Object.getOwnPropertyDescriptor(documentObject, 'cookie')
+    : undefined;
+
+  if (documentObject) {
+    Object.defineProperty(documentObject, 'cookie', {
+      configurable: true,
+      get() {
+        return Array.from(cookieJar.entries())
+          .map(([name, value]) => `${name}=${value}`)
+          .join('; ');
+      },
+      set(value: string) {
+        const [nameValue, ...attributes] = value.split(';');
+        const [name, rawValue = ''] = nameValue.split('=');
+        const shouldDelete = attributes.some((attribute) =>
+          attribute.toLowerCase().includes('max-age=0'),
+        );
+
+        const domainAttribute = attributes.find((attribute) => attribute.toLowerCase().includes('domain='));
+        const domainValue = domainAttribute?.split('=')[1]?.replace(/^\./, '') ?? '';
+
+        if (shouldDelete) {
+          cookieJar.delete(name);
+        } else if (!options.acceptedDomain || !domainValue || domainValue === options.acceptedDomain) {
+          cookieJar.set(name, rawValue);
+        }
+      },
+    });
+  }
+
+  return () => {
+    if (documentObject && originalCookieDescriptor) {
+      Object.defineProperty(documentObject, 'cookie', originalCookieDescriptor);
+    }
+  };
+}
+
+const cookieSuite =
+  typeof document !== 'undefined' && typeof document.cookie === 'string'
+    ? describe
+    : describe.skip;
 
 // ===========================================================================
 // MemoryStore
@@ -11,7 +80,7 @@ import { getRootDomain, resetRootDomainCache } from './stores/CookieStore';
 
 describe('MemoryStore', () => {
   let s: IStore;
-  beforeEach(() => { s = MemoryStore; s.clear(); });
+  beforeEach(() => { s = new BaseStorage(); s.clear(); });
 
   it('is always available', () => expect(s.isAvailable()).toBe(true));
   it('get returns undefined for missing key', () => expect(s.get('x')).toBeUndefined());
@@ -54,8 +123,7 @@ describe('MemoryStore', () => {
 describe('LocalStore', () => {
   let s: IStore;
   beforeEach(() => {
-    localStorage.clear();
-    s = LocalStore;
+    s = new BaseStorage(createStorageMock());
   });
 
   it('is available in JSDOM', () => expect(s.isAvailable()).toBe(true));
@@ -89,8 +157,7 @@ describe('LocalStore', () => {
 describe('SessionStore', () => {
   let s: IStore;
   beforeEach(() => {
-    sessionStorage.clear();
-    s = SessionStore;
+    s = new BaseStorage(createStorageMock());
   });
 
   it('is available in JSDOM', () => expect(s.isAvailable()).toBe(true));
@@ -109,36 +176,97 @@ describe('SessionStore', () => {
 // CookieStore
 // ===========================================================================
 
-describe('CookieStore', () => {
-  beforeEach(() => resetRootDomainCache());
+cookieSuite('CookieStore', () => {
+  let restoreBrowserEnvironment: (() => void) | undefined;
+
+  beforeEach(() => {
+    restoreBrowserEnvironment = installCookieEnvironment();
+    resetRootDomainCache();
+  });
+
+  afterEach(() => {
+    restoreBrowserEnvironment?.();
+    restoreBrowserEnvironment = undefined;
+  });
 
   it('is available when document exists', () => {
-    const s = CookieStore;
+    const s = new CookieStoreClass();
     expect(s.isAvailable()).toBe(true);
   });
 
   it('set/get round-trips a string value', () => {
-    const s = CookieStore;
+    const s = new CookieStoreClass();
     s.set('wince_k', 'hello');
     expect(s.get('wince_k')).toBe('hello');
   });
 
   it('set/get round-trips an object', () => {
-    const s = CookieStore;
+    const s = new CookieStoreClass();
     s.set('wince_obj', { a: 1 });
     expect(s.get('wince_obj')).toEqual({ a: 1 });
   });
 
   it('delete removes the entry', () => {
-    const s = CookieStore;
+    const s = new CookieStoreClass();
     s.set('wince_del', 'x');
     s.delete('wince_del');
     expect(s.get('wince_del')).toBeUndefined();
   });
 
   it('get returns undefined for missing key', () => {
-    const s = CookieStore;
+    const s = new CookieStoreClass();
     expect(s.get('__nonexistent__')).toBeUndefined();
+  });
+
+  it('supports non-cross-subdomain cookie writes', () => {
+    const s = new CookieStoreClass({
+      crossSubdomain: false,
+      secure: false,
+      sameSite: 'Strict',
+    });
+
+    s.set('wince_nocross', 'hello');
+    expect(s.get('wince_nocross')).toBe('hello');
+    s.delete('wince_nocross');
+    expect(s.get('wince_nocross')).toBeUndefined();
+  });
+});
+
+// ===========================================================================
+// BaseStorage
+// ===========================================================================
+
+describe('BaseStorage', () => {
+  it('is unavailable when the backing storage throws during probing', () => {
+    const store = new BaseStorage({
+      getItem: () => null,
+      setItem: () => { throw new Error('unavailable'); },
+      removeItem: () => undefined,
+      clear: () => undefined,
+      key: () => null,
+      length: 0,
+    } as unknown as Storage);
+
+    expect(store.isAvailable()).toBe(false);
+  });
+
+  it('refreshKey updates the current value immediately', () => {
+    const data = new Map<string, string>();
+    const backing = {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); },
+      removeItem: (key: string) => { data.delete(key); },
+      clear: () => { data.clear(); },
+      key: (index: number) => Array.from(data.keys())[index] ?? null,
+      get length() { return data.size; },
+    } as unknown as Storage;
+    const store = new BaseStorage(backing, 0);
+
+    store.set('count', 1);
+    store.flush();
+    store.refreshKey('count', (current) => String(Number(current ?? '0') + 1));
+
+    expect(store.get('count')).toBe(2);
   });
 });
 
@@ -148,10 +276,23 @@ describe('CookieStore', () => {
 
 describe('createStore', () => {
   it('returns a working store when localStorage is available', () => {
+    const originalLocalStorage = (globalThis as Record<string, unknown>).localStorage;
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: createStorageMock(),
+      configurable: true,
+    });
+
+    try {
     const s = createMultiStore({ strategies: ['localStorage', 'memory'] });
     s.set('test_key', 'test_value');
     expect(s.get('test_key')).toBe('test_value');
     expect(s.isAvailable()).toBe(true);
+    } finally {
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: originalLocalStorage,
+        configurable: true,
+      });
+    }
   });
 
   it('falls back to MemoryStore when no strategy is available', () => {
@@ -173,8 +314,22 @@ describe('createStore', () => {
 // getRootDomain
 // ===========================================================================
 
-describe('getRootDomain', () => {
-  beforeEach(() => resetRootDomainCache());
+cookieSuite('getRootDomain', () => {
+  let restoreBrowserEnvironment: (() => void) | undefined;
+
+  beforeEach(() => {
+    restoreBrowserEnvironment = installCookieEnvironment({
+      hostname: 'app.example.test',
+      protocol: 'https:',
+      acceptedDomain: 'example.test',
+    });
+    resetRootDomainCache();
+  });
+
+  afterEach(() => {
+    restoreBrowserEnvironment?.();
+    restoreBrowserEnvironment = undefined;
+  });
 
   it('returns empty string for localhost', () => {
     expect(getRootDomain('localhost')).toBe('');
@@ -186,6 +341,10 @@ describe('getRootDomain', () => {
 
   it('returns empty string for ::1', () => {
     expect(getRootDomain('::1')).toBe('');
+  });
+
+  it('discovers a registrable root domain via cookie probing', () => {
+    expect(getRootDomain('app.example.test')).toBe('example.test');
   });
 });
 
