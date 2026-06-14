@@ -56,7 +56,7 @@ describe('compressSync', () => {
   });
 
   it('accepts an ArrayBuffer', () => {
-    const input = new TextEncoder().encode('buffer input').buffer;
+    const input = new TextEncoder().encode('buffer input').buffer as ArrayBuffer;
     const out = compressSync(input);
     expect(new TextDecoder().decode(decompressSync(out))).toBe('buffer input');
   });

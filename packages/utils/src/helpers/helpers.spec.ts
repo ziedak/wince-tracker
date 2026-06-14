@@ -55,8 +55,12 @@ describe('utils/helpers', () => {
   it('deepMerge merges nested objects and preserves target values', () => {
     expect(
       deepMerge(
-        { profile: { name: 'Ada', role: 'admin' }, active: true },
-        { profile: { role: 'editor' }, display: 'full' },
+        {
+          profile: { name: 'Ada', role: 'admin' },
+          display: 'full',
+          active: true,
+        },
+        { profile: { role: 'editor', name: 'Ada' } },
       ),
     ).toEqual({
       profile: { name: 'Ada', role: 'editor' },
@@ -72,7 +76,9 @@ describe('utils/helpers', () => {
   });
 
   it('getValueByPath and setValueByPath read and write nested values', () => {
-    const value: Record<string, unknown> = { user: { profile: { name: 'Ada' } } };
+    const value: Record<string, unknown> = {
+      user: { profile: { name: 'Ada' } },
+    };
 
     expect(getValueByPath(value, 'user.profile.name')).toBe('Ada');
     expect(getValueByPath(value, '')).toBeUndefined();
@@ -133,7 +139,9 @@ describe('utils/helpers', () => {
     expect(setInRange(5, 1, 10)).toBe(5);
     expect(setInRange(-2, 1, 10)).toBe(1);
     expect(setInRange(15, 1, 10, false)).toBe(10);
-    expect(() => setInRange(Number.NaN, 1, 10)).toThrow('Value must be a valid number');
+    expect(() => setInRange(Number.NaN, 1, 10)).toThrow(
+      'Value must be a valid number',
+    );
     expect(roundToDecimalPlaces(1.2345, 2)).toBe(1.23);
     expect(formatNumberWithCommas(1234567)).toBe('1,234,567');
     expect(parseNumberFromString('42.5')).toBe(42.5);
