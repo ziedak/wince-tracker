@@ -195,24 +195,27 @@ Events queued before enrichment finishes are buffered. The first non-`$identify`
 
 - `track(name, props)` forwards the caller-provided `props` as-is.
 - `page(props)` forwards the caller-provided `props` as-is, then the page plugin adds page-view metrics on top.
-- `identify(uid, traits)` does not use `props`; person traits are sent in `$set` / `$set_once`.
+- `identify(uid, traits)` emits `$identify` when traits are present. It does not use `props`; person traits are sent in `$set` / `$set_once`.
 
 ### Page view events
 
 `$page_view` is the most structured event emitted by the browser SDK.
 
-On the initial page load, the event includes:
+Every `$page_view` includes the fields injected by `WinceClient.page()`:
 
-- `title` and `ref` from `WinceClient.page()`.
-- `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term` when present in `location.search`.
-- `device_type` (`mobile`, `tablet`, or `desktop`).
-- `screen_width_px` and `screen_height_px`.
-- `referrer_type` (`direct`, `organic_search`, `social`, `internal`, `referral`, or `email` / `paid_search` when overridden by UTM medium).
+- `title`
+- `ref`
+
+The page-view plugin then adds these source-specific fields:
+
 - `navigation_type` when the Navigation Timing API provides it.
 - `$session_resume` when `navigation_type === 'back_forward'`.
-- `$plugin_source: 'pageView'`.
+- `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, and `utm_term` when present in `location.search`.
+- `device_type` (`mobile`, `tablet`, or `desktop`).
+- `screen_width_px` and `screen_height_px`.
+- `referrer_type` on the initial page view only. The allowed values are `direct`, `organic_search`, `social`, `internal`, `referral`, `email`, and `paid_search`.
 
-On later SPA navigations, the event includes the same navigation and device fields plus the previous-page metrics from `buildMetrics()` with a `$prev_` prefix, such as:
+On later SPA navigations, the event also includes the previous-page metrics from `buildMetrics()` with a `$prev_` prefix:
 
 - `$prev_scroll_depth_pct`
 - `$prev_max_scroll_depth_pct`
@@ -227,10 +230,27 @@ On later SPA navigations, the event includes the same navigation and device fiel
 - `$prev_visible_time_ms`
 - `$prev_time_on_page_ms`
 
-When scroll milestone tracking is enabled, the plugin also emits `$scroll_depth` with:
+When scroll tracking is enabled, `$scroll_depth` is emitted with:
 
 - `depth_pct` set to `25`, `50`, `75`, or `100`.
 - `$plugin_source: 'pageView'`.
+
+When the page is drained on `pagehide`, `$page_leave` is emitted with the current-page metrics from `buildMetrics('')` plus:
+
+- `scroll_depth_pct`
+- `max_scroll_depth_pct`
+- `scroll_px`
+- `max_scroll_px`
+- `content_height_px`
+- `scroll_direction_changes`
+- `scroll_max_velocity`
+- `resize_count`
+- `viewport_width_px`
+- `viewport_height_px`
+- `visible_time_ms`
+- `time_on_page_ms`
+- `session_duration_ms`
+- `$plugin_source: 'pageView'`
 
 ### Click and interaction events
 
@@ -239,12 +259,12 @@ When scroll milestone tracking is enabled, the plugin also emits `$scroll_depth`
 - `tag`
 - `text`
 - `elements_chain`
-- any own properties collected from the click capture metadata
 - `href` when the target is link-like
 - `track_id` when the target carries `data-track`
 - `has_modifier` when the click used a modifier key
 - `label` when one of `data-track-label`, `aria-label`, `data-label`, or `title` is present
 - `hesitation_ms` when the last mouse movement happened at least 500 ms before the click
+- all own `data-track-*` attributes except `data-track-label`
 - `$plugin_source: 'click'`
 
 `mountRageClick()` emits `$rage_click` with:
@@ -256,7 +276,7 @@ When scroll milestone tracking is enabled, the plugin also emits `$scroll_depth`
 - `first_at`
 - `href` when available
 - `track_id` when available
-- any own properties collected from the click capture metadata
+- all own `data-track-*` attributes except `data-track-label`
 - `$plugin_source: 'rageClick'`
 
 `mountDeadClick()` emits `$dead_click` with:
@@ -270,6 +290,18 @@ When scroll milestone tracking is enabled, the plugin also emits `$scroll_depth`
 - `has_modifier`
 - `$plugin_source: 'deadClick'`
 
+`mountExitIntent()` emits `$exit_intent` with:
+
+- `page` set to `location.pathname`
+- `$plugin_source: 'exitIntent'`
+
+`mountCopyPaste()` emits `$copy` and `$cut` with:
+
+- `tag`
+- `text`
+- `href`
+- `$plugin_source: 'copyPaste'`
+
 `mountTextSelection()` emits `$text_selection` with:
 
 - `selected_length`
@@ -277,9 +309,31 @@ When scroll milestone tracking is enabled, the plugin also emits `$scroll_depth`
 - `context_track_id` when the selection is inside a `[data-track]` ancestor
 - `$plugin_source: 'textSelection'`
 
-### Cart events
+`mountBacktrack()` emits `$backtrack` with:
+
+- `from_path`
+- `to_path`
+- `$plugin_source: 'backtrack'`
+
+### Cart and checkout events
 
 `mountCart()` listens for `wince:cart` CustomEvents and forwards the `detail` payload as event properties, minus the `action` field itself. The emitted event name is `$cart_${action}`.
+
+The supported cart action values are:
+
+- `add`
+- `remove`
+- `update`
+- `checkout_start`
+- `checkout_complete`
+- `view_cart`
+- `product_view`
+- `checkout_step`
+- `checkout_abandon`
+- `purchase`
+- `option_selected`
+- `coupon_applied`
+- `coupon_failed`
 
 The cart plugin forwards these documented detail fields when present:
 
@@ -308,18 +362,27 @@ Additional cart-derived fields are added by the plugin itself:
 
 - `time_on_step_ms` on `$cart_checkout_step` when a previous checkout step exists.
 - `last_step`, `cart_value_total`, `time_spent_seconds`, and `trigger` on `$cart_checkout_abandon`.
-- `$plugin_source: 'cart'`.
+- `$plugin_source: 'cart'`
 
 High-value cart actions such as `add`, `remove`, `purchase`, `checkout_complete`, `coupon_applied`, and `coupon_failed` are routed to the higher-priority transport lane.
 
-### Form events
+### Form and input events
+
+`mountFormAbandon()` emits `$form_abandon` with:
+
+- `form_id`
+- `form_name`
+- `form_action`
+- `fields_filled`
+- `field_count`
+- `$plugin_source: 'formAbandon'`
 
 `mountFormInteraction()` emits:
 
-- `$form_start` with `form_id`, `form_name`, `form_action`, `field_name`, `field_type`, and `$plugin_source: 'formInteraction'`.
-- `$form_field_focused` with `field_name`, `field_type`, and `$plugin_source: 'formInteraction'`.
-- `$form_field_blurred` with `field_name`, `field_type`, optional `dwell_ms`, and `$plugin_source: 'formInteraction'`.
-- `$form_frustration` with `field_name`, `field_type`, `focus_blur_count`, and `$plugin_source: 'formInteraction'`.
+- `$form_start` with `form_id`, `form_name`, `form_action`, `field_name`, `field_type`, and `$plugin_source: 'formInteraction'`
+- `$form_field_focused` with `field_name`, `field_type`, and `$plugin_source: 'formInteraction'`
+- `$form_field_blurred` with `field_name`, `field_type`, optional `dwell_ms`, and `$plugin_source: 'formInteraction'`
+- `$form_frustration` with `field_name`, `field_type`, `focus_blur_count`, and `$plugin_source: 'formInteraction'`
 
 Payment-card and password fields are excluded from this plugin.
 
@@ -331,17 +394,41 @@ Payment-card and password fields are excluded from this plugin.
 - `validation_message`
 - `$plugin_source: 'validationError'`
 
-### Error and performance events
+`mountDoubleSubmit()` emits `$double_submit` with:
 
-`mountErrorCapture()` emits `$error` with:
+- `form_id`
+- `form_action`
+- `interval_ms`
+- `$plugin_source: 'doubleSubmit'`
 
-- `type` (`uncaught` or `unhandled_rejection`)
-- `message`
-- `source` for uncaught errors
-- `lineno`
-- `colno`
-- `stack` when available and not truncated away
-- `$plugin_source: 'errorCapture'`
+### Behavioral and session signals
+
+`mountElementVisibility()` emits `$element_visible` with:
+
+- `element_id`
+- `element_tag`
+- `visible_ms`
+- `max_visible_ratio`
+- `$plugin_source: 'elementVisibility'`
+
+`mountTabIdle()` emits `$user_idle` with:
+
+- `idle_ms`
+- `$plugin_source: 'tabIdle'`
+
+`mountTabFocus()` emits either legacy per-transition events or rollup events depending on `rollupIntervalMs`:
+
+- Legacy mode (`rollupIntervalMs: 0`) emits `$tab_blur` with only `$plugin_source: 'tabFocus'`.
+- Legacy mode also emits `$tab_focus` with `$plugin_source: 'tabFocus'` and optional `away_duration_ms`.
+- Rollup mode emits `$tab_focus_rollup` with `blur_count`, `away_ms`, `focused_ms`, `window_ms`, `reason`, and `$plugin_source: 'tabFocus'`.
+
+`mountNetworkQuality()` emits `$network_quality` with:
+
+- `effective_type`
+- `downlink_mbps`
+- `rtt_ms`
+- `save_data`
+- `$plugin_source: 'networkQuality'`
 
 `mountPerformance()` emits `$performance` with:
 
@@ -353,6 +440,42 @@ Payment-card and password fields are excluded from this plugin.
 - `dom_content_loaded_ms`
 - `load_ms`
 - `$plugin_source: 'performance'`
+
+### Error and intervention events
+
+`mountErrorCapture()` emits `$error` with:
+
+- `type` (`uncaught` or `unhandled_rejection`)
+- `message`
+- `source` for uncaught errors
+- `lineno`
+- `colno`
+- `stack` when available and not truncated away
+- `$plugin_source: 'errorCapture'`
+
+`mountIntervention()` emits the following events, each with the base intervention props plus `$plugin_source: 'intervention'`:
+
+- `$intervention_shown`
+- `$intervention_dismissed`
+- `$intervention_clicked`
+- `$intervention_accepted`
+- `$intervention_ignored`
+- `$intervention_suppressed`
+
+The shared intervention props are:
+
+- `intervention_id`
+- `intervention_type`
+- `channel`
+- `trigger_reason`
+- `variant_id`
+- `experiment_id`
+- `confidence_score`
+- `target_section`
+- `cooldown_bucket`
+
+`$intervention_dismissed` also accepts `dismissed_reason`.
+`$intervention_suppressed` also accepts `suppressed_reason`.
 
 ### Notes on forward compatibility
 
