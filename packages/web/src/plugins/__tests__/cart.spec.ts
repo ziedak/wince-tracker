@@ -45,7 +45,7 @@ describe('mountCart — basic forwarding', () => {
     const tracker = makeTracker();
     const cleanup = mountCart(tracker);
 
-    for (const action of ['add', 'remove', 'purchase', 'checkout_complete']) {
+    for (const action of ['add', 'remove', 'purchase', 'checkout_complete', 'checkout_abandon']) {
       tracker.track.mockClear();
       document.dispatchEvent(new CustomEvent('wince:cart', { detail: { action } }));
       expect(tracker.track).toHaveBeenCalledWith(
@@ -174,6 +174,35 @@ describe('mountCart — autoAbandon', () => {
       ([name]: [string]) => name === '$cart_checkout_abandon',
     );
     expect(abandonCalls).toHaveLength(1);
+
+    cleanup();
+  });
+
+  it('resets the idle timer on checkout activity before abandoning', () => {
+    const tracker = makeTracker();
+    const cleanup = mountCart(tracker, { autoAbandon: true, abandonIdleMs: 500 });
+
+    document.dispatchEvent(new CustomEvent('wince:cart', {
+      detail: { action: 'checkout_start' },
+    }));
+
+    tracker.track.mockClear();
+    jest.advanceTimersByTime(250);
+    window.dispatchEvent(new Event('keydown'));
+
+    jest.advanceTimersByTime(499);
+    expect((tracker.track as jest.Mock).mock.calls.filter(
+      ([name]: [string]) => name === '$cart_checkout_abandon',
+    )).toHaveLength(0);
+
+    jest.advanceTimersByTime(1);
+
+    expect(tracker.track).toHaveBeenCalledWith(
+      '$cart_checkout_abandon',
+      expect.objectContaining({ trigger: 'idle' }),
+      undefined,
+      expect.objectContaining({ priority: 'critical' }),
+    );
 
     cleanup();
   });

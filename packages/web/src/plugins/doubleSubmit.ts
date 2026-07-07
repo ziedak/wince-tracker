@@ -1,4 +1,5 @@
 import type { WinceClient } from '../client';
+import { DoubleSubmitType, pluginSource } from './types';
 
 export interface DoubleSubmitOptions {
   /**
@@ -31,23 +32,23 @@ export function mountDoubleSubmit(
 ): () => void {
   if (typeof document === 'undefined') return () => undefined;
 
-  const windowMs   = options?.windowMs ?? 2000;
+  const windowMs = options?.windowMs ?? 2000;
   const lastSubmit = new WeakMap<HTMLFormElement, number>();
 
   const handler = (e: Event) => {
     const form = e.target;
     if (!(form instanceof HTMLFormElement)) return;
 
-    const now  = Date.now();
+    const now = Date.now();
     const last = lastSubmit.get(form);
     lastSubmit.set(form, now);
 
     if (last !== undefined && now - last <= windowMs) {
-      tracker.track('$double_submit', {
-        form_id:        form.id     || undefined,
-        form_action:    form.action || undefined,
-        interval_ms:    now - last,
-        $plugin_source: 'doubleSubmit',
+      tracker.track<DoubleSubmitType>('$double_submit', {
+        form_id: form.id || undefined,
+        form_action: form.action || undefined,
+        interval_ms: now - last,
+        $plugin_source: pluginSource.DoubleSubmit,
       });
     }
   };
@@ -56,5 +57,6 @@ export function mountDoubleSubmit(
   // navigates away on a traditional (non-AJAX) form submission.
   document.addEventListener('submit', handler, { capture: true });
 
-  return () => document.removeEventListener('submit', handler, { capture: true });
+  return () =>
+    document.removeEventListener('submit', handler, { capture: true });
 }

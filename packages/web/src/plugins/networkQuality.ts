@@ -1,12 +1,13 @@
 import type { WinceClient } from '../client';
+import { NetworkQualityType, pluginSource } from './types';
 
 // The Network Information API is non-standard and absent in Firefox/Safari.
 // All access is guarded by feature detection and wrapped in try/catch.
 interface NetworkInformation extends EventTarget {
   readonly effectiveType?: 'slow-2g' | '2g' | '3g' | '4g';
-  readonly downlink?:      number;   // Mbps
-  readonly rtt?:           number;   // ms
-  readonly saveData?:      boolean;
+  readonly downlink?: number; // Mbps
+  readonly rtt?: number; // ms
+  readonly saveData?: boolean;
   addEventListener(type: 'change', listener: () => void): void;
   removeEventListener(type: 'change', listener: () => void): void;
 }
@@ -14,8 +15,8 @@ interface NetworkInformation extends EventTarget {
 function getConnection(): NetworkInformation | undefined {
   try {
     const nav = navigator as Navigator & {
-      connection?:       NetworkInformation;
-      mozConnection?:    NetworkInformation;
+      connection?: NetworkInformation;
+      mozConnection?: NetworkInformation;
       webkitConnection?: NetworkInformation;
     };
     return nav.connection ?? nav.mozConnection ?? nav.webkitConnection;
@@ -47,12 +48,15 @@ export function mountNetworkQuality(tracker: WinceClient): () => void {
 
   function emit(): void {
     try {
-      const props: Record<string, unknown> = { $plugin_source: 'networkQuality' };
-      if (conn!.effectiveType !== undefined) props['effective_type'] = conn!.effectiveType;
-      if (conn!.downlink      !== undefined) props['downlink_mbps']  = conn!.downlink;
-      if (conn!.rtt           !== undefined) props['rtt_ms']         = conn!.rtt;
-      if (conn!.saveData      !== undefined) props['save_data']      = conn!.saveData;
-      tracker.track('$network_quality', props);
+      if (!conn) return;
+      const props: NetworkQualityType = {
+        $plugin_source: pluginSource.NetworkQuality,
+      };
+      if (conn.effectiveType) props['effective_type'] = conn.effectiveType;
+      if (conn.downlink) props['downlink_mbps'] = conn.downlink;
+      if (conn.rtt) props['rtt_ms'] = conn.rtt;
+      if (conn.saveData) props['save_data'] = conn.saveData;
+      tracker.track<NetworkQualityType>('$network_quality', props);
     } catch {
       // API may throw on restricted origins — fail silently.
     }

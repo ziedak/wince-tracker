@@ -1,7 +1,6 @@
 import type { WinceClient } from '../client';
-import { useClickCapture, type ClickData } from './_click-utils';
-
-export type { ClickData };
+import { useClickCapture } from './_click-utils';
+import { ClickType, pluginSource } from './types';
 
 // Attributes scanned (in order) to find a human-readable label for the click.
 const LABEL_ATTRS = ['data-track-label', 'aria-label', 'data-label', 'title'];
@@ -30,24 +29,27 @@ export function mountClick(tracker: WinceClient): () => void {
   if (typeof document === 'undefined') return () => undefined;
 
   let _lastMoveAt = 0;
-  const onMouseMove = () => { _lastMoveAt = Date.now(); };
+  const onMouseMove = () => {
+    _lastMoveAt = Date.now();
+  };
   document.addEventListener('mousemove', onMouseMove, { passive: true });
 
   const removeClickCapture = useClickCapture((data) => {
-    const props: Record<string, unknown> = {
-      tag:             data.tag,
-      text:            data.text,
-      elements_chain:  data.elements_chain,
+    const props: Omit<ClickType, '$plugin_source'> = {
+      tag: data.tag,
+      text: data.text,
+      elements_chain: data.elements_chain,
     };
 
     // Own-property guard — avoids prototype pollution via …data.attrs spread.
+    const attrs: Record<string, unknown> = {};
     for (const k of Object.keys(data.attrs)) {
       if (Object.prototype.hasOwnProperty.call(data.attrs, k)) {
-        props[k] = data.attrs[k];
+        attrs[k] = data.attrs[k];
       }
     }
 
-    if (data.href)    props['href']     = data.href;
+    if (data.href) props['href'] = data.href;
     if (data.trackId) props['track_id'] = data.trackId;
     if (data.hasModifier) props['has_modifier'] = data.hasModifier;
 
@@ -59,7 +61,11 @@ export function mountClick(tracker: WinceClient): () => void {
       if (ms >= 500) props['hesitation_ms'] = ms;
     }
 
-    tracker.track('$click', { ...props, $plugin_source: 'click' });
+    tracker.track<ClickType>('$click', {
+      ...props,
+      attrs,
+      $plugin_source: pluginSource.Click,
+    });
   });
 
   return () => {

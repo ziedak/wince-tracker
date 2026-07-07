@@ -1,4 +1,5 @@
 import type { WinceClient } from '../client';
+import { pluginSource, TabIdleType } from './types';
 
 export interface TabIdleOptions {
   /** Milliseconds of inactivity before firing `$user_idle`. Default: 30 000 (30 s). */
@@ -6,7 +7,11 @@ export interface TabIdleOptions {
 }
 
 const ACTIVITY_EVENTS = [
-  'mousemove', 'keydown', 'scroll', 'click', 'touchstart',
+  'mousemove',
+  'keydown',
+  'scroll',
+  'click',
+  'touchstart',
 ] as const;
 
 /**
@@ -38,8 +43,8 @@ export function mountTabIdle(
 ): () => void {
   if (typeof window === 'undefined') return () => undefined;
 
-  const idleMs     = options?.idleMs ?? 30_000;
-  let _timer:      ReturnType<typeof setTimeout> | undefined;
+  const idleMs = options?.idleMs ?? 30_000;
+  let _timer: ReturnType<typeof setTimeout> | undefined;
   let _idleStartAt = Date.now();
 
   function arm(): void {
@@ -47,9 +52,9 @@ export function mountTabIdle(
     _idleStartAt = Date.now();
     _timer = setTimeout(() => {
       _timer = undefined;
-      tracker.track('$user_idle', {
+      tracker.track<TabIdleType>('$user_idle', {
         idle_ms: Date.now() - _idleStartAt,
-        $plugin_source: 'tabIdle',
+        $plugin_source: pluginSource.TabIdle,
       });
       // Re-arm so subsequent idle periods are also detected.
       arm();

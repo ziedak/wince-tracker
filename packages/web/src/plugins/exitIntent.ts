@@ -1,4 +1,5 @@
 import type { WinceClient } from '../client';
+import { ExitIntentType, pluginSource } from './types';
 
 /**
  * Exit-intent detection plugin.
@@ -22,11 +23,16 @@ export function mountExitIntent(tracker: WinceClient): () => void {
     // Only the top edge signals tab-close intent; side/bottom exits are noise.
     if (e.clientY > 0) return;
     _fired = true;
-
-    tracker.track('$exit_intent', {
-      page: typeof location !== 'undefined' ? location.pathname : undefined,
-      $plugin_source: 'exitIntent',
-    }, undefined, { priority: 'critical' });
+    if (typeof location === 'undefined' || !location.pathname) return;
+    tracker.track<ExitIntentType>(
+      '$exit_intent',
+      {
+        page: location.pathname,
+        $plugin_source: pluginSource.ExitIntent,
+      },
+      undefined,
+      { priority: 'critical' },
+    );
   };
 
   document.addEventListener('mouseout', handler);

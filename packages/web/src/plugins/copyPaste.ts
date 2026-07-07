@@ -1,5 +1,6 @@
 import type { WinceClient } from '../client';
 import { isSafeValue } from './_click-utils';
+import { CopyPasteType, pluginSource } from './types';
 
 // ---------------------------------------------------------------------------
 // PII-safe text scrubbing
@@ -35,8 +36,15 @@ export function mountCopyPaste(tracker: WinceClient): () => void {
   // Fields we never read from.
   const EXCLUDED_TYPES = new Set(['password', 'hidden']);
   const EXCLUDED_AC = new Set([
-    'cc-number', 'cc-csc', 'cc-exp', 'cc-exp-month', 'cc-exp-year',
-    'cc-name', 'cc-type', 'current-password', 'new-password',
+    'cc-number',
+    'cc-csc',
+    'cc-exp',
+    'cc-exp-month',
+    'cc-exp-year',
+    'cc-name',
+    'cc-type',
+    'current-password',
+    'new-password',
   ]);
 
   function isExcluded(el: HTMLInputElement): boolean {
@@ -69,11 +77,11 @@ export function mountCopyPaste(tracker: WinceClient): () => void {
     if (!text) return;
 
     const action = e.type === 'cut' ? 'cut' : 'copy';
-    tracker.track(`$${action}`, {
+    tracker.track<CopyPasteType>(`$${action}`, {
       tag,
       text,
       href: (target as HTMLAnchorElement).href || undefined,
-      $plugin_source: 'copyPaste',
+      $plugin_source: pluginSource.CopyPaste,
     });
   };
 

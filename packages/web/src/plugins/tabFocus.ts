@@ -1,4 +1,5 @@
 import type { WinceClient } from '../client';
+import { pluginSource, TabFocusType } from './types';
 
 export interface TabFocusOptions {
   /**
@@ -25,7 +26,10 @@ export interface TabFocusOptions {
  *
  * @returns A cleanup function that removes all event listeners.
  */
-export function mountTabFocus(tracker: WinceClient, options?: TabFocusOptions): () => void {
+export function mountTabFocus(
+  tracker: WinceClient,
+  options?: TabFocusOptions,
+): () => void {
   if (typeof document === 'undefined') return () => undefined;
 
   const rollupMs = options?.rollupIntervalMs ?? 60_000;
@@ -34,21 +38,29 @@ export function mountTabFocus(tracker: WinceClient, options?: TabFocusOptions): 
   if (rollupMs === 0) {
     let blurredAt: number | undefined;
     let isBlurred = false;
-
     const handler = () => {
       if (document.hidden) {
         if (isBlurred) return;
         isBlurred = true;
         blurredAt = Date.now();
-        tracker.track('$tab_blur', { $plugin_source: 'tabFocus' });
+        tracker.track<TabFocusType>('$tab_blur', {
+          $plugin_source: pluginSource.TabFocus,
+          blurred_at: blurredAt,
+        });
         return;
       }
+
       if (!isBlurred) return;
-      const props: Record<string, unknown> = { $plugin_source: 'tabFocus' };
-      if (blurredAt !== undefined) props['away_duration_ms'] = Date.now() - blurredAt;
+
+      const awayDurationMs = blurredAt !== undefined ? Date.now() - blurredAt : undefined;
+      const blurredAtSnapshot = blurredAt;
       blurredAt = undefined;
       isBlurred = false;
-      tracker.track('$tab_focus', props);
+      tracker.track<TabFocusType>('$tab_focus', {
+        $plugin_source: pluginSource.TabFocus,
+        blurred_at: blurredAtSnapshot,
+        away_duration_ms: awayDurationMs,
+      });
     };
 
     document.addEventListener('visibilitychange', handler);
@@ -57,59 +69,63 @@ export function mountTabFocus(tracker: WinceClient, options?: TabFocusOptions): 
 
   // ── Rollup mode ────────────────────────────────────────────────────────────
   // Accumulators for the current window.
-  let _blurCount    = 0;
-  let _awayMs       = 0;
-  let _focusedMs    = 0;
-  let _blurredAt    = document.hidden ? Date.now() : 0;  // non-zero if currently hidden
-  let _windowStart  = Date.now();
+  let _blurCount = 0;
+  let _awayMs = 0;
+  let _focusedMs = 0;
+  let _windowStart = Date.now();
+  let _lastChangeAt = _windowStart;
+  let _isHidden = document.hidden;
   let _rollupTimer: ReturnType<typeof setInterval> | undefined;
 
   function flush(reason: 'interval' | 'pagehide'): void {
     // Snapshot any in-progress blur/focus period before emitting.
     const now = Date.now();
-    if (_blurredAt > 0) {
-      _awayMs    += now - _blurredAt;
-      _blurredAt  = now;  // keep tracking — not resetting (still hidden)
+    if (_isHidden) {
+      _awayMs += now - _lastChangeAt;
     } else {
-      _focusedMs += now - _windowStart;
+      _focusedMs += now - _lastChangeAt;
     }
 
     if (_blurCount === 0 && reason === 'interval') {
       // Nothing happened this window — skip the event entirely.
       _windowStart = now;
-      _focusedMs   = 0;
+      _lastChangeAt = now;
+      _focusedMs = 0;
       return;
     }
 
-    tracker.track('$tab_focus_rollup', {
-      blur_count:      _blurCount,
-      away_ms:         _awayMs,
-      focused_ms:      _focusedMs,
-      window_ms:       now - _windowStart,
+    tracker.track<TabFocusType>('$tab_focus_rollup', {
+      blur_count: _blurCount,
+      away_ms: _awayMs,
+      focused_ms: _focusedMs,
+      window_ms: now - _windowStart,
       reason,
-      $plugin_source:  'tabFocus',
+      $plugin_source: pluginSource.TabFocus,
     });
 
     // Reset accumulators for the next window.
-    _blurCount   = 0;
-    _awayMs      = 0;
-    _focusedMs   = 0;
+    _blurCount = 0;
+    _awayMs = 0;
+    _focusedMs = 0;
     _windowStart = now;
+    _lastChangeAt = now;
   }
 
   const onVisibilityChange = () => {
     const now = Date.now();
     if (document.hidden) {
       // Transitioned to hidden — record focused time up to now.
-      _focusedMs += now - (_blurredAt > 0 ? _windowStart : _windowStart);
+      if (_isHidden) return;
+      _focusedMs += now - _lastChangeAt;
       _blurCount++;
-      _blurredAt = now;
+      _isHidden = true;
+      _lastChangeAt = now;
     } else {
       // Transitioned to visible — tally away time.
-      if (_blurredAt > 0) {
-        _awayMs   += now - _blurredAt;
-        _blurredAt = 0;
-      }
+      if (!_isHidden) return;
+      _awayMs += now - _lastChangeAt;
+      _isHidden = false;
+      _lastChangeAt = now;
     }
   };
 

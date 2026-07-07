@@ -1,5 +1,6 @@
 export interface EventPayload {
   [key: string]: unknown;
+  _priority?: 'critical' | 'high' | 'normal';
 }
 
 /**

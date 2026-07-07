@@ -289,9 +289,9 @@ export class WinceClient extends BaseClient {
    * @param options - Optional delivery options. Use `{ priority: 'critical' }`
    *   for P0 events that must be sent immediately (exit_intent, rage_click, etc.).
    */
-  track(
+  track<T extends Record<string, unknown>>(
     name: string,
-    props?: Record<string, unknown>,
+    props?: T,
     personProps?: PersonProps,
     options?: TrackOptions,
   ): void {
@@ -306,7 +306,15 @@ export class WinceClient extends BaseClient {
       this._drop('sampling');
       return;
     }
-    this._enqueueRaw(name, props, this._pageviewId, undefined, personProps, undefined, options?.priority);
+    this._enqueueRaw(
+      name,
+      props,
+      this._pageviewId,
+      undefined,
+      personProps,
+      undefined,
+      options?.priority,
+    );
   }
 
   /**
@@ -314,7 +322,7 @@ export class WinceClient extends BaseClient {
    * Rotates the `pageview_id` / `prev_pageview_id` chain before emitting,
    * so funnel queries can follow navigation hops.
    */
-  page(props?: Record<string, unknown>): void {
+  page<T extends Record<string, unknown>>(props?: T): void {
     if (this._consent !== null && !this._consent.isGranted()) {
       this._drop('consent');
       return;
@@ -696,7 +704,7 @@ function _batchConfigForConnection(effectiveType: string): BatchConfig | null {
 export function init(config: WinceConfig): WinceClient {
   return new WinceClient(config);
 }
-export function  activatePlugins(client: WinceClient): void {
-    mountPageView(client);
-    mountClick(client);
-  }
+export function activatePlugins(client: WinceClient): void {
+  mountPageView(client);
+  mountClick(client);
+}

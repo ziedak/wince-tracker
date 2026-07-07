@@ -1,5 +1,6 @@
 import type { WinceClient } from '../client';
 import { useBroadCapture } from './_click-utils';
+import { DeadClickType, pluginSource } from './types';
 
 export interface DeadClickOptions {
   timeoutMs?: number;
@@ -15,18 +16,18 @@ export function mountDeadClick(
     return () => undefined;
   }
 
-  const timeoutMs          = options?.timeoutMs          ?? 500;
-  const ignoreLinks        = options?.ignoreLinks        ?? false;
+  const timeoutMs = options?.timeoutMs ?? 500;
+  const ignoreLinks = options?.ignoreLinks ?? false;
   const ignoreModifierKeys = options?.ignoreModifierKeys ?? true;
 
   interface DeadClickCandidate {
-    tag:       string;
-    text:      string;
-    href?:     string;
+    tag: string;
+    text: string;
+    href?: string;
     track_id?: string;
-    chain:     string;
-    at:        number;
-    modifier:  boolean;
+    chain: string;
+    at: number;
+    modifier: boolean;
   }
 
   const pending: DeadClickCandidate[] = [];
@@ -38,16 +39,21 @@ export function mountDeadClick(
       _checkTimer = undefined;
     }
     for (const c of pending) {
-      tracker.track('$dead_click', {
-        tag:            c.tag,
-        text:           c.text,
-        href:           c.href,
-        track_id:       c.track_id,
-        elements_chain: c.chain,
-        elapsed_ms:     Date.now() - c.at,
-        has_modifier:   c.modifier,
-        $plugin_source: 'deadClick',
-      }, undefined, { priority: 'critical' });
+      tracker.track<DeadClickType>(
+        '$dead_click',
+        {
+          tag: c.tag,
+          text: c.text,
+          href: c.href,
+          track_id: c.track_id,
+          elements_chain: c.chain,
+          elapsed_ms: Date.now() - c.at,
+          has_modifier: c.modifier,
+          $plugin_source: pluginSource.DeadClick,
+        },
+        undefined,
+        { priority: 'critical' },
+      );
     }
     pending.length = 0;
   }
@@ -83,7 +89,10 @@ export function mountDeadClick(
     });
   };
 
-  window.addEventListener('scroll', _onScroll, { capture: true, passive: true });
+  window.addEventListener('scroll', _onScroll, {
+    capture: true,
+    passive: true,
+  });
   document.addEventListener('selectionchange', clearPending);
 
   const unsub = useBroadCapture((data) => {
@@ -91,12 +100,12 @@ export function mountDeadClick(
     if (ignoreLinks && (data.tag === 'a' || data.href)) return;
 
     pending.push({
-      tag:      data.tag,
-      text:     data.text,
-      href:     data.href,
+      tag: data.tag,
+      text: data.text,
+      href: data.href,
       track_id: data.trackId,
-      chain:    data.elements_chain,
-      at:       Date.now(),
+      chain: data.elements_chain,
+      at: Date.now(),
       modifier: data.hasModifier,
     });
     armCheck();

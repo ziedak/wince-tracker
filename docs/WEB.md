@@ -364,7 +364,9 @@ Additional cart-derived fields are added by the plugin itself:
 - `last_step`, `cart_value_total`, `time_spent_seconds`, and `trigger` on `$cart_checkout_abandon`.
 - `$plugin_source: 'cart'`
 
-High-value cart actions such as `add`, `remove`, `purchase`, `checkout_complete`, `coupon_applied`, and `coupon_failed` are routed to the higher-priority transport lane.
+High-value cart actions such as `add`, `remove`, `purchase`, `checkout_complete`, `checkout_abandon`, `coupon_applied`, and `coupon_failed` are routed to the higher-priority transport lane.
+
+When `autoAbandon` is enabled, the cart plugin also resets the idle countdown on checkout activity events so active typing, clicking, scrolling, and similar interaction does not trigger a false abandon signal.
 
 ### Form and input events
 

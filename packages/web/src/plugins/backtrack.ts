@@ -1,4 +1,5 @@
 import type { WinceClient } from '../client';
+import { BacktrackType, pluginSource } from './types';
 
 /**
  * Back-navigation (backtrack) plugin.
@@ -21,16 +22,16 @@ export function mountBacktrack(tracker: WinceClient): () => void {
   if (typeof window === 'undefined') return () => undefined;
 
   // Save originals before patching so cleanup can restore the exact same references.
-  const origPush    = history.pushState;
+  const origPush = history.pushState;
   const origReplace = history.replaceState;
 
   let previousPath = location.pathname + location.search + location.hash;
 
   // Patch pushState so SPA navigations update previousPath.
   history.pushState = function (
-    data:   unknown,
+    data: unknown,
     unused: string,
-    url?:   string | URL | null,
+    url?: string | URL | null,
   ): void {
     origPush.call(history, data, unused, url);
     previousPath = location.pathname + location.search + location.hash;
@@ -39,9 +40,9 @@ export function mountBacktrack(tracker: WinceClient): () => void {
   // Patch replaceState so URL-cleanup navigations (query rewrites, etc.)
   // also keep previousPath in sync.
   history.replaceState = function (
-    data:   unknown,
+    data: unknown,
     unused: string,
-    url?:   string | URL | null,
+    url?: string | URL | null,
   ): void {
     origReplace.call(history, data, unused, url);
     previousPath = location.pathname + location.search + location.hash;
@@ -49,11 +50,11 @@ export function mountBacktrack(tracker: WinceClient): () => void {
 
   const onPopstate = () => {
     const from = previousPath;
-    const to   = location.pathname + location.search + location.hash;
-    tracker.track('$backtrack', {
-      from_path:      from,
-      to_path:        to,
-      $plugin_source: 'backtrack',
+    const to = location.pathname + location.search + location.hash;
+    tracker.track<BacktrackType>('$backtrack', {
+      from_path: from,
+      to_path: to,
+      $plugin_source: pluginSource.Backtrack,
     });
     previousPath = to;
   };
@@ -62,7 +63,7 @@ export function mountBacktrack(tracker: WinceClient): () => void {
 
   return () => {
     window.removeEventListener('popstate', onPopstate);
-    history.pushState    = origPush;
+    history.pushState = origPush;
     history.replaceState = origReplace;
   };
 }

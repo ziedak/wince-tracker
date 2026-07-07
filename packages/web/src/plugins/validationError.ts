@@ -1,10 +1,20 @@
 import type { WinceClient } from '../client';
+import { pluginSource, ValidationErrorType } from './types';
 
 // Same PII exclusion set as _click-utils.ts — never report payment/password fields.
 const EXCLUDED_AUTOCOMPLETE = new Set([
-  'cc-name', 'cc-given-name', 'cc-additional-name', 'cc-family-name',
-  'cc-number', 'cc-exp', 'cc-exp-month', 'cc-exp-year', 'cc-csc',
-  'cc-type', 'current-password', 'new-password',
+  'cc-name',
+  'cc-given-name',
+  'cc-additional-name',
+  'cc-family-name',
+  'cc-number',
+  'cc-exp',
+  'cc-exp-month',
+  'cc-exp-year',
+  'cc-csc',
+  'cc-type',
+  'current-password',
+  'new-password',
 ]);
 
 function isExcluded(input: HTMLInputElement): boolean {
@@ -35,7 +45,12 @@ export function mountValidationError(tracker: WinceClient): () => void {
 
   // Dedup: browser fires `invalid` once per field on a single submit click.
   // Two submissions within 100 ms on the same field = one event.
-  const _recent = new Map<string, number>();
+  const _recent = new WeakMap<Element, number>();
+
+  function getFieldType(control: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement): string {
+    if (control instanceof HTMLTextAreaElement) return 'textarea';
+    return control.type || control.tagName.toLowerCase();
+  }
 
   const handler = (e: Event) => {
     const input = e.target;
@@ -43,37 +58,34 @@ export function mountValidationError(tracker: WinceClient): () => void {
       !(input instanceof HTMLInputElement) &&
       !(input instanceof HTMLTextAreaElement) &&
       !(input instanceof HTMLSelectElement)
-    ) return;
+    )
+      return;
 
     if (input instanceof HTMLInputElement && isExcluded(input)) return;
 
-    const fieldName  = (input as HTMLInputElement).name || input.id || input.tagName.toLowerCase();
-    const formId     = (input as HTMLInputElement).form?.id || undefined;
-    const dedupKey   = `${formId ?? ''}:${fieldName}`;
-    const now        = Date.now();
-    const lastFired  = _recent.get(dedupKey);
+    const fieldName = input.name || input.id || input.tagName.toLowerCase();
+    const formId = input.form?.id || undefined;
+    const now = Date.now();
+    const lastFired = _recent.get(input);
 
     if (lastFired !== undefined && now - lastFired < 100) return;
 
-    // FIFO eviction: cap the map at 50 entries before inserting the new key.
-    if (_recent.size >= 50) {
-      _recent.delete(_recent.keys().next().value!);
-    }
-    _recent.set(dedupKey, now);
+    _recent.set(input, now);
 
-    const validationMessage = (input as HTMLInputElement).validationMessage || undefined;
+    const validationMessage = input.validationMessage || undefined;
 
-    tracker.track('$validation_error', {
-      field_name:         fieldName,
-      field_type:         (input as HTMLInputElement).type ?? input.tagName.toLowerCase(),
-      form_id:            formId,
+    tracker.track<ValidationErrorType>('$validation_error', {
+      field_name: fieldName,
+      field_type: getFieldType(input),
+      form_id: formId,
       validation_message: validationMessage,
-      $plugin_source:     'validationError',
+      $plugin_source: pluginSource.ValidationError,
     });
   };
 
   // `invalid` does not bubble — capture is required.
   document.addEventListener('invalid', handler, { capture: true });
 
-  return () => document.removeEventListener('invalid', handler, { capture: true });
+  return () =>
+    document.removeEventListener('invalid', handler, { capture: true });
 }

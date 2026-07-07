@@ -1,4 +1,10 @@
 import type { WinceClient, TrackOptions } from '../client';
+import {
+  CartActionType,
+  CartCheckoutAbandonType,
+  CartEventDetail,
+  pluginSource,
+} from './types';
 
 /**
  * Expected shape of the `wince:cart` CustomEvent detail.
@@ -17,73 +23,38 @@ import type { WinceClient, TrackOptions } from '../client';
  * }));
  * ```
  */
-export interface CartEventDetail {
-  /** The cart action. */
-  action:
-    | 'add'
-    | 'remove'
-    | 'update'
-    | 'checkout_start'
-    | 'checkout_complete'
-    | 'view_cart'
-    | 'product_view'
-    | 'checkout_step'
-    | 'checkout_abandon'
-    | 'purchase'
-    | 'option_selected'
-    | 'coupon_applied'
-    | 'coupon_failed';
-  product_id?: string;
-  name?: string;
-  variant_id?: string;
-  quantity?:   number;
-  price?:      number;
-  currency?:   string;
-  cart_id?:    string;
-  /** Total cart value including all items. */
-  cart_value_total?: number;
-  /** Number of distinct items in the cart. */
-  item_count?: number;
-  /** Applied coupon code, if any. */
-  coupon_code?: string;
-  /** Final order ID — used with `purchase` action. */
-  order_id?: string;
-  /** Final order revenue — used with `purchase` action. */
-  revenue?: number;
-  /** Product category — used with `product_view` and `add`. */
-  category?: string;
-  /** Whether the product is in stock — used with `product_view`. */
-  stock_status?: 'in_stock' | 'out_of_stock' | 'low_stock';
-  /** Checkout step index — used with `checkout_step` action. */
-  step?: number;
-  /** Human-readable step label — e.g. `'shipping'`, `'payment'`. */
-  step_name?: string;
-  /** Option name — used with `option_selected`. e.g. `'color'`, `'size'`. */
-  option_name?: string;
-  /** Option value — used with `option_selected`. e.g. `'red'`, `'XL'`. */
-  option_value?: string;
-  /** Coupon code attempted — used with `coupon_applied` and `coupon_failed`. */
-  code_attempted?: string;
-  /** Rejection reason — used with `coupon_failed`. e.g. `'expired'`, `'invalid'`. */
-  failure_reason?: string;
-  /** Any additional properties are forwarded as-is. */
-  [key: string]: unknown;
-}
 
 // Actions where data loss is costly — routed to the high-priority lane.
 const HIGH_PRIORITY_ACTIONS = new Set<string>([
-  'add', 'remove', 'purchase', 'checkout_complete', 'coupon_applied', 'coupon_failed',
+  'add',
+  'remove',
+  'purchase',
+  'checkout_complete',
+  'checkout_abandon',
+  'coupon_applied',
+  'coupon_failed',
 ]);
 
 // Actions that mark the start/continuation of checkout — arm the abandon timer.
 const CHECKOUT_IN_PROGRESS_ACTIONS = new Set<string>([
-  'checkout_start', 'checkout_step',
+  'checkout_start',
+  'checkout_step',
 ]);
 
 // Actions that resolve checkout (success or explicit abandon) — disarm the timer.
 const CHECKOUT_RESOLVED_ACTIONS = new Set<string>([
-  'purchase', 'checkout_complete', 'checkout_abandon',
+  'purchase',
+  'checkout_complete',
+  'checkout_abandon',
 ]);
+
+const ACTIVITY_EVENTS = [
+  'mousemove',
+  'keydown',
+  'scroll',
+  'click',
+  'touchstart',
+] as const;
 
 export interface CartOptions {
   /**
@@ -125,40 +96,72 @@ export interface CartOptions {
  * ```
  */
 const KNOWN_ACTIONS = new Set<string>([
-  'add', 'remove', 'update', 'checkout_start', 'checkout_complete',
-  'view_cart', 'product_view', 'checkout_step', 'checkout_abandon', 'purchase',
-  'option_selected', 'coupon_applied', 'coupon_failed',
+  'add',
+  'remove',
+  'update',
+  'checkout_start',
+  'checkout_complete',
+  'view_cart',
+  'product_view',
+  'checkout_step',
+  'checkout_abandon',
+  'purchase',
+  'option_selected',
+  'coupon_applied',
+  'coupon_failed',
 ]);
 
-export function mountCart(tracker: WinceClient, options?: CartOptions): () => void {
+export function mountCart(
+  tracker: WinceClient,
+  options?: CartOptions,
+): () => void {
   if (typeof document === 'undefined') return () => undefined;
 
   // ── Abandon detection state ───────────────────────────────────────────────
-  const autoAbandon  = options?.autoAbandon  ?? false;
+  const autoAbandon = options?.autoAbandon ?? false;
   const abandonIdleMs = options?.abandonIdleMs ?? 30_000;
 
-  let _inCheckout      = false;
-  let _abandoned       = false;
-  let _lastStep:       string | undefined;
+  let _inCheckout = false;
+  let _abandoned = false;
+  let _lastStep: string | undefined;
   let _cartValueTotal: number | undefined;
   let _checkoutStartAt = 0;
-  let _stepStartAt     = 0;
-  let _idleTimer:      ReturnType<typeof setTimeout> | undefined;
+  let _stepStartAt = 0;
+  let _idleTimer: ReturnType<typeof setTimeout> | undefined;
   let _drainHookRemove: (() => void) | undefined;
 
-  function armAbandon(stepName: string | undefined, cartValue: number | undefined): void {
-    _inCheckout  = true;
-    _abandoned   = false;
-    _lastStep    = stepName;
-    _cartValueTotal = cartValue;
-    if (_checkoutStartAt === 0) _checkoutStartAt = Date.now();
+  function clearIdleTimer(): void {
+    if (_idleTimer !== undefined) {
+      clearTimeout(_idleTimer);
+      _idleTimer = undefined;
+    }
+  }
 
-    // Reset idle countdown on every checkout_step update.
-    if (_idleTimer !== undefined) clearTimeout(_idleTimer);
+  function scheduleIdleTimer(): void {
+    clearIdleTimer();
     _idleTimer = setTimeout(() => {
       _idleTimer = undefined;
       fireAbandon('idle');
     }, abandonIdleMs);
+  }
+
+  function resetIdleTimer(): void {
+    if (!_inCheckout || _abandoned) return;
+    scheduleIdleTimer();
+  }
+
+  function armAbandon(
+    stepName: string | undefined,
+    cartValue: number | undefined,
+  ): void {
+    _inCheckout = true;
+    _abandoned = false;
+    _lastStep = stepName;
+    _cartValueTotal = cartValue;
+    if (_checkoutStartAt === 0) _checkoutStartAt = Date.now();
+
+    // Reset idle countdown on each checkout signal.
+    scheduleIdleTimer();
 
     // Register pagehide hook once.
     if (!_drainHookRemove) {
@@ -169,14 +172,11 @@ export function mountCart(tracker: WinceClient, options?: CartOptions): () => vo
   }
 
   function disarmAbandon(): void {
-    _inCheckout      = false;
-    _abandoned       = false;
+    _inCheckout = false;
+    _abandoned = false;
     _checkoutStartAt = 0;
-    _stepStartAt     = 0;
-    if (_idleTimer !== undefined) {
-      clearTimeout(_idleTimer);
-      _idleTimer = undefined;
-    }
+    _stepStartAt = 0;
+    clearIdleTimer();
     _drainHookRemove?.();
     _drainHookRemove = undefined;
   }
@@ -184,24 +184,21 @@ export function mountCart(tracker: WinceClient, options?: CartOptions): () => vo
   function fireAbandon(trigger: 'idle' | 'exit_intent' | 'pagehide'): void {
     if (!_inCheckout || _abandoned) return;
     _abandoned = true;
-    if (_idleTimer !== undefined) {
-      clearTimeout(_idleTimer);
-      _idleTimer = undefined;
-    }
+    clearIdleTimer();
     // Clean up drain hook — it has served its purpose.
     _drainHookRemove?.();
     _drainHookRemove = undefined;
     // Reset start time so a subsequent checkout attempt gets a fresh clock.
     const timeSpent = Math.round((Date.now() - _checkoutStartAt) / 1_000);
     _checkoutStartAt = 0;
-    tracker.track(
+    tracker.track<CartCheckoutAbandonType>(
       '$cart_checkout_abandon',
       {
-        last_step:          _lastStep,
-        cart_value_total:   _cartValueTotal,
+        last_step: _lastStep,
+        cart_value_total: _cartValueTotal,
         time_spent_seconds: timeSpent,
         trigger,
-        $plugin_source:     'cart',
+        $plugin_source: pluginSource.Cart,
       },
       undefined,
       { priority: 'critical' },
@@ -215,8 +212,19 @@ export function mountCart(tracker: WinceClient, options?: CartOptions): () => vo
     fireAbandon('exit_intent');
   };
 
+  const onActivity = (): void => {
+    if (!autoAbandon) return;
+    resetIdleTimer();
+  };
+
   if (autoAbandon) {
     document.addEventListener('mouseout', onMouseOut);
+    for (const evt of ACTIVITY_EVENTS) {
+      window.addEventListener(evt, onActivity, {
+        passive: true,
+        capture: true,
+      });
+    }
   }
 
   // ── Main CustomEvent handler ───────────────────────────────────────────────
@@ -226,7 +234,9 @@ export function mountCart(tracker: WinceClient, options?: CartOptions): () => vo
     const { action, ...rest } = detail;
     if (!KNOWN_ACTIONS.has(action)) return;
 
-    const trackOpts: TrackOptions | undefined = HIGH_PRIORITY_ACTIONS.has(action)
+    const trackOpts: TrackOptions | undefined = HIGH_PRIORITY_ACTIONS.has(
+      action,
+    )
       ? { priority: 'high' }
       : undefined;
 
@@ -234,17 +244,27 @@ export function mountCart(tracker: WinceClient, options?: CartOptions): () => vo
     if (action === 'checkout_step' && _stepStartAt > 0) {
       stepProps['time_on_step_ms'] = Date.now() - _stepStartAt;
     }
-    tracker.track(`$cart_${action}`, { ...rest, ...stepProps, $plugin_source: 'cart' }, undefined, trackOpts);
-    if (action === 'checkout_start' || action === 'checkout_step') _stepStartAt = Date.now();
+    tracker.track<CartActionType>(
+      `$cart_${action}`,
+      { ...rest, ...stepProps, $plugin_source: pluginSource.Cart },
+      undefined,
+      trackOpts,
+    );
+    if (action === 'checkout_start' || action === 'checkout_step')
+      _stepStartAt = Date.now();
 
     if (autoAbandon) {
       if (CHECKOUT_IN_PROGRESS_ACTIONS.has(action)) {
-        const cartValue = typeof rest['cart_value_total'] === 'number'
-          ? (rest['cart_value_total'] as number)
-          : undefined;
-        const stepName = typeof rest['step_name'] === 'string'
-          ? (rest['step_name'] as string)
-          : action === 'checkout_start' ? 'start' : undefined;
+        const cartValue =
+          typeof rest['cart_value_total'] === 'number'
+            ? (rest['cart_value_total'] as number)
+            : undefined;
+        const stepName =
+          typeof rest['step_name'] === 'string'
+            ? (rest['step_name'] as string)
+            : action === 'checkout_start'
+              ? 'start'
+              : undefined;
         armAbandon(stepName, cartValue);
       } else if (CHECKOUT_RESOLVED_ACTIONS.has(action)) {
         disarmAbandon();
@@ -258,8 +278,10 @@ export function mountCart(tracker: WinceClient, options?: CartOptions): () => vo
     document.removeEventListener('wince:cart', handler);
     if (autoAbandon) {
       document.removeEventListener('mouseout', onMouseOut);
+      for (const evt of ACTIVITY_EVENTS) {
+        window.removeEventListener(evt, onActivity, { capture: true });
+      }
       disarmAbandon();
     }
   };
 }
-

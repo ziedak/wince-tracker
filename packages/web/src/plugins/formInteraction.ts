@@ -1,4 +1,5 @@
 import type { WinceClient } from '../client';
+import { FormInteractionType, pluginSource } from './types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -14,13 +15,23 @@ export interface FormInteractionOptions {
 
 // Same autocomplete exclusion as formAbandon.
 const EXCLUDED_AUTOCOMPLETE = new Set([
-  'cc-number', 'cc-csc', 'cc-exp', 'cc-exp-month', 'cc-exp-year',
-  'cc-name', 'cc-type', 'current-password', 'new-password',
+  'cc-number',
+  'cc-csc',
+  'cc-exp',
+  'cc-exp-month',
+  'cc-exp-year',
+  'cc-name',
+  'cc-type',
+  'current-password',
+  'new-password',
 ]);
 
 function isPayment(input: HTMLInputElement): boolean {
   const type = (input.type || 'text').toLowerCase();
-  return type === 'password' || EXCLUDED_AUTOCOMPLETE.has((input.autocomplete || '').toLowerCase());
+  return (
+    type === 'password' ||
+    EXCLUDED_AUTOCOMPLETE.has((input.autocomplete || '').toLowerCase())
+  );
 }
 
 function fieldKey(input: HTMLInputElement): string {
@@ -67,26 +78,28 @@ export function mountFormInteraction(
     const input = e.target as HTMLInputElement;
     if (input.tagName !== 'INPUT' && input.tagName !== 'TEXTAREA') return;
     if (isPayment(input)) return;
+    const form = input.form;
 
     if (!_started) {
       _started = true;
-      const form = input.form;
-      tracker.track('$form_start', {
-        form_id:     form?.id         || undefined,
-        form_name:   form?.name       || undefined,
+      tracker.track<FormInteractionType>('$form_start', {
+        form_id: form?.id || undefined,
+        form_name: form?.name || undefined,
         form_action: form?.getAttribute('action') || undefined,
-        field_name:  fieldKey(input),
-        field_type:  input.type || 'text',
-        $plugin_source: 'formInteraction',
+        field_name: fieldKey(input),
+        field_type: input.type || 'text',
+        $plugin_source: pluginSource.FormInteraction,
       });
     }
 
     if (captureField) {
       active.set(input, Date.now());
-      tracker.track('$form_field_focused', {
+      tracker.track<FormInteractionType>('$form_field_focused', {
+        form_id: form?.id || undefined,
+        form_name: form?.name || undefined,
         field_name: fieldKey(input),
         field_type: input.type || 'text',
-        $plugin_source: 'formInteraction',
+        $plugin_source: pluginSource.FormInteraction,
       });
     }
 
@@ -106,13 +119,15 @@ export function mountFormInteraction(
     if (captureField) {
       const entered = active.get(input);
       active.delete(input);
-      const props: Record<string, unknown> = {
+      const props: FormInteractionType = {
+        form_id: input.form?.id || undefined,
+        form_name: input.form?.name || undefined,
         field_name: fieldKey(input),
         field_type: input.type || 'text',
-        $plugin_source: 'formInteraction',
+        $plugin_source: pluginSource.FormInteraction,
       };
       if (entered) props['dwell_ms'] = Date.now() - entered;
-      tracker.track('$form_field_blurred', props);
+      tracker.track<FormInteractionType>('$form_field_blurred', props);
     }
 
     // Frustration: repeated focus-blur cycles with no value change.
@@ -123,11 +138,13 @@ export function mountFormInteraction(
         // Value changed — successful fill, reset cycle.
         cycle.count = 0;
       } else if (cycle.count >= 3) {
-        tracker.track('$form_frustration', {
+        tracker.track<FormInteractionType>('$form_frustration', {
+          form_id: input.form?.id || undefined,
+          form_name: input.form?.name || undefined,
           field_name: fKey,
           field_type: input.type || 'text',
           focus_blur_count: cycle.count,
-          $plugin_source: 'formInteraction',
+          $plugin_source: pluginSource.FormInteraction,
         });
         cycle.count = 0;
       }

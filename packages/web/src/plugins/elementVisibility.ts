@@ -1,4 +1,5 @@
 import type { WinceClient } from '../client';
+import { ElementVisibilityType, pluginSource } from './types';
 
 export interface ElementVisibilityOptions {
   /**
@@ -64,12 +65,12 @@ export function mountElementVisibility(
 
   function emitVisible(el: Element, visibleMs: number, maxRatio: number): void {
     const elementId = el.getAttribute('data-track-visible') || el.id || undefined;
-    tracker.track('$element_visible', {
+    tracker.track<ElementVisibilityType>('$element_visible', {
       element_id:        elementId,
       element_tag:       el.tagName.toLowerCase(),
       visible_ms:        Math.round(visibleMs),
       max_visible_ratio: Math.round(maxRatio * 100) / 100,
-      $plugin_source:    'elementVisibility',
+      $plugin_source:    pluginSource.ElementVisibility,
     });
   }
 

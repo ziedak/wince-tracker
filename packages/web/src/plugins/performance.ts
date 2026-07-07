@@ -1,4 +1,5 @@
 import type { WinceClient } from '../client';
+import { PerformanceType, pluginSource } from './types';
 
 export interface PerformanceOptions {
   /**
@@ -44,7 +45,10 @@ export interface PerformanceOptions {
  * const cleanup = mountPerformance(tracker);
  * ```
  */
-export function mountPerformance(tracker: WinceClient, options?: PerformanceOptions): () => void {
+export function mountPerformance(
+  tracker: WinceClient,
+  options?: PerformanceOptions,
+): () => void {
   if (
     typeof window === 'undefined' ||
     typeof PerformanceObserver === 'undefined'
@@ -52,10 +56,10 @@ export function mountPerformance(tracker: WinceClient, options?: PerformanceOpti
     return () => undefined;
   }
 
-  const trackLCP               = options?.trackLCP               ?? true;
-  const trackCLS               = options?.trackCLS               ?? true;
-  const trackINP               = options?.trackINP               ?? true;
-  const trackNavigationTiming  = options?.trackNavigationTiming  ?? true;
+  const trackLCP = options?.trackLCP ?? true;
+  const trackCLS = options?.trackCLS ?? true;
+  const trackINP = options?.trackINP ?? true;
+  const trackNavigationTiming = options?.trackNavigationTiming ?? true;
 
   let _lcp: number | undefined;
   let _cls = 0;
@@ -84,7 +88,9 @@ export function mountPerformance(tracker: WinceClient, options?: PerformanceOpti
       // The last entry is the most up-to-date LCP candidate.
       const entries = list.getEntries();
       if (entries.length > 0) {
-        _lcp = Math.round((entries[entries.length - 1] as PerformancePaintTiming).startTime);
+        _lcp = Math.round(
+          (entries[entries.length - 1] as PerformancePaintTiming).startTime,
+        );
       }
     });
   }
@@ -93,7 +99,10 @@ export function mountPerformance(tracker: WinceClient, options?: PerformanceOpti
     tryObserve('layout-shift', (list) => {
       for (const entry of list.getEntries()) {
         // Only count unexpected shifts (no recent user input within 500ms).
-        const ls = entry as PerformanceEntry & { hadRecentInput?: boolean; value?: number };
+        const ls = entry as PerformanceEntry & {
+          hadRecentInput?: boolean;
+          value?: number;
+        };
         if (!ls.hadRecentInput) {
           _cls += ls.value ?? 0;
         }
@@ -107,15 +116,21 @@ export function mountPerformance(tracker: WinceClient, options?: PerformanceOpti
     // interactionId > 0 filters to genuine user interactions (click, key, tap) —
     // excluding programmatic dispatchEvent calls and scroll events which have no
     // interactionId and should not count toward INP.
-    tryObserve('event', (list) => {
-      for (const entry of list.getEntries()) {
-        // Cast to include interactionId (not yet typed in all TS DOM lib versions).
-        const e = entry as PerformanceEventTiming & { interactionId?: number };
-        if (!e.interactionId) continue; // not a user interaction — skip
-        const d = Math.round(e.duration);
-        if (_inp === undefined || d > _inp) _inp = d;
-      }
-    }, { durationThreshold: 0 });
+    tryObserve(
+      'event',
+      (list) => {
+        for (const entry of list.getEntries()) {
+          // Cast to include interactionId (not yet typed in all TS DOM lib versions).
+          const e = entry as PerformanceEventTiming & {
+            interactionId?: number;
+          };
+          if (!e.interactionId) continue; // not a user interaction — skip
+          const d = Math.round(e.duration);
+          if (_inp === undefined || d > _inp) _inp = d;
+        }
+      },
+      { durationThreshold: 0 },
+    );
   }
 
   let _fired = false;
@@ -124,7 +139,7 @@ export function mountPerformance(tracker: WinceClient, options?: PerformanceOpti
     if (_fired) return;
     _fired = true;
 
-    const props: Record<string, number | undefined> = {};
+    const props: Omit<PerformanceType, '$plugin_source'> = {};
 
     if (trackLCP) props['lcp_ms'] = _lcp;
 
@@ -141,13 +156,15 @@ export function mountPerformance(tracker: WinceClient, options?: PerformanceOpti
           | PerformanceNavigationTiming
           | undefined;
         if (nav) {
-          const fcpEntry = performance.getEntriesByName('first-contentful-paint')[0] as
-            | PerformancePaintTiming
-            | undefined;
+          const fcpEntry = performance.getEntriesByName(
+            'first-contentful-paint',
+          )[0] as PerformancePaintTiming | undefined;
           if (fcpEntry) props['fcp_ms'] = Math.round(fcpEntry.startTime);
           // TTFB = responseStart relative to navigationStart (which is 0 for navigation entries).
           props['ttfb_ms'] = Math.round(nav.responseStart);
-          props['dom_content_loaded_ms'] = Math.round(nav.domContentLoadedEventEnd);
+          props['dom_content_loaded_ms'] = Math.round(
+            nav.domContentLoadedEventEnd,
+          );
           props['load_ms'] = Math.round(nav.loadEventEnd);
         }
       } catch {
@@ -155,7 +172,10 @@ export function mountPerformance(tracker: WinceClient, options?: PerformanceOpti
       }
     }
 
-    tracker.track('$performance', { ...props, $plugin_source: 'performance' });
+    tracker.track<PerformanceType>('$performance', {
+      ...props,
+      $plugin_source: pluginSource.Performance,
+    });
   }
 
   // Fire on page hide / visibility hidden — first one wins (_fired guard).

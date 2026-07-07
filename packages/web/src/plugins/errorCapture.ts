@@ -1,4 +1,5 @@
 import type { WinceClient } from '../client';
+import { ErrorCaptureType, pluginSource } from './types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -63,10 +64,10 @@ export function mountErrorCapture(
 ): () => void {
   if (typeof window === 'undefined') return () => undefined;
 
-  const captureWindowErrors        = options.captureWindowErrors        ?? true;
+  const captureWindowErrors = options.captureWindowErrors ?? true;
   const captureUnhandledRejections = options.captureUnhandledRejections ?? true;
-  const maxStackLength             = options.maxStackLength             ?? 1024;
-  const ignore                     = options.ignore                     ?? [];
+  const maxStackLength = options.maxStackLength ?? 1024;
+  const ignore = options.ignore ?? [];
 
   // Dedup: same error message + line number → only captured once per session.
   // Plain Map + FIFO eviction is sufficient for a max-20 set; the LRU linked-list
@@ -77,7 +78,8 @@ export function mountErrorCapture(
     if (_dedupKeys.has(key)) return true;
     if (_dedupKeys.size >= 20) {
       // FIFO eviction — delete the oldest entry (Map iterator returns in insertion order).
-      _dedupKeys.delete(_dedupKeys.keys().next().value!);
+      const oldestKey = _dedupKeys.keys().next().value;
+      if (oldestKey) _dedupKeys.delete(oldestKey);
     }
     _dedupKeys.set(key, true);
     return false;
@@ -89,7 +91,9 @@ export function mountErrorCapture(
 
   function trimStack(stack: string | undefined): string | undefined {
     if (!stack) return undefined;
-    return stack.length > maxStackLength ? stack.slice(0, maxStackLength) : stack;
+    return stack.length > maxStackLength
+      ? stack.slice(0, maxStackLength)
+      : stack;
   }
 
   const cleanups: Array<() => void> = [];
@@ -102,14 +106,14 @@ export function mountErrorCapture(
       const key = `${message}:${event.lineno ?? 0}`;
       if (deduped(key)) return;
 
-      tracker.track('$error', {
-        type:    'uncaught',
+      tracker.track<ErrorCaptureType>('$error', {
+        type: 'uncaught',
         message,
-        source:  event.filename  || undefined,
-        lineno:  event.lineno    || undefined,
-        colno:   event.colno     || undefined,
-        stack:   trimStack((event.error as Error | undefined)?.stack),
-        $plugin_source: 'errorCapture',
+        source: event.filename || undefined,
+        lineno: event.lineno || undefined,
+        colno: event.colno || undefined,
+        stack: trimStack((event.error as Error | undefined)?.stack),
+        $plugin_source: pluginSource.ErrorCapture,
       });
     };
 
@@ -119,28 +123,31 @@ export function mountErrorCapture(
 
   if (captureUnhandledRejections) {
     const handler = (event: PromiseRejectionEvent) => {
-      const reason  = event.reason as unknown;
-      const message = reason instanceof Error
-        ? reason.message
-        : typeof reason === 'string'
-          ? reason
-          : 'Unhandled promise rejection';
+      const reason = event.reason as unknown;
+      const message =
+        reason instanceof Error
+          ? reason.message
+          : typeof reason === 'string'
+            ? reason
+            : 'Unhandled promise rejection';
 
       if (shouldIgnore(message)) return;
 
       const key = `rejection:${message}`;
       if (deduped(key)) return;
 
-      tracker.track('$error', {
-        type:    'unhandled_rejection',
+      tracker.track<ErrorCaptureType>('$error', {
+        type: 'unhandled_rejection',
         message,
-        stack:   trimStack(reason instanceof Error ? reason.stack : undefined),
-        $plugin_source: 'errorCapture',
+        stack: trimStack(reason instanceof Error ? reason.stack : undefined),
+        $plugin_source: pluginSource.ErrorCapture,
       });
     };
 
     window.addEventListener('unhandledrejection', handler);
-    cleanups.push(() => window.removeEventListener('unhandledrejection', handler));
+    cleanups.push(() =>
+      window.removeEventListener('unhandledrejection', handler),
+    );
   }
 
   return () => {

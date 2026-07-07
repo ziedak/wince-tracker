@@ -1,4 +1,15 @@
 import type { WinceClient } from '../client';
+import {
+  NavPageProps,
+  NavProps,
+  PageProps,
+  PageViewProps,
+  PageViewType,
+  pluginSource,
+  ScrollDepthType,
+  utmKeys,
+  UtmProps,
+} from './types';
 
 export interface PageViewOptions {
   /** Track scroll depth on each page. Default: true. */
@@ -33,16 +44,10 @@ const _SOCIAL_DOMAINS = [
   'snapchat.',
 ];
 
-function _buildUtmProps(search: string): Record<string, string> {
+function _buildUtmProps(search: string): UtmProps {
   const params = new URLSearchParams(search);
-  const result: Record<string, string> = {};
-  for (const k of [
-    'utm_source',
-    'utm_medium',
-    'utm_campaign',
-    'utm_content',
-    'utm_term',
-  ]) {
+  const result: UtmProps = {};
+  for (const k of utmKeys) {
     const v = params.get(k);
     if (v) result[k] = v;
   }
@@ -124,14 +129,14 @@ export function mountPageView(
         )?.type
       : undefined;
 
-  function buildNavProps(): Record<string, unknown> {
-    if (!_navType) return {};
-    const p: Record<string, unknown> = { navigation_type: _navType };
+  function buildNavProps(): NavProps {
+    if (!_navType) return {} as NavProps;
+    const p: NavProps = { navigation_type: _navType };
     if (_navType === 'back_forward') p['$session_resume'] = true;
     return p;
   }
 
-  function buildInitialPageProps(): Record<string, unknown> {
+  function buildInitialPageProps(): PageProps {
     const utmProps = _buildUtmProps(location.search);
     const utmMedium = utmProps['utm_medium'];
     let referrerType: string = _classifyReferrer(
@@ -150,12 +155,13 @@ export function mountPageView(
     };
   }
 
-  function buildNavPageProps(): Record<string, unknown> {
+  function buildNavPageProps(): NavPageProps {
     return {
       ..._buildUtmProps(location.search),
       device_type: _getDeviceType(window.innerWidth),
       screen_width_px: screen.width,
       screen_height_px: screen.height,
+      referrer_type: _classifyReferrer(document.referrer, location.hostname),
     };
   }
 
@@ -195,26 +201,26 @@ export function mountPageView(
     }
   }
 
-  function buildMetrics(prefix = '$prev_'): Record<string, number> {
-    const props: Record<string, number> = {};
+  function buildMetrics(): PageViewProps {
+    const props: PageViewProps = {};
     if (trackScrollDepth) {
-      props[`${prefix}scroll_depth_pct`] = _lastScrollPct;
-      props[`${prefix}max_scroll_depth_pct`] = _maxScrollPct;
-      props[`${prefix}scroll_px`] = _lastScrollY;
-      props[`${prefix}max_scroll_px`] = _maxScrollY;
-      props[`${prefix}content_height_px`] = _contentH;
-      props[`${prefix}scroll_direction_changes`] = _directionChanges;
-      props[`${prefix}scroll_max_velocity`] = Math.round(_maxVelocity * 1000); // px/s
-      props[`${prefix}resize_count`] = _resizeCount;
-      props[`${prefix}viewport_width_px`] = _lastWidth;
-      props[`${prefix}viewport_height_px`] = _lastHeight;
+      props[`scroll_depth_pct`] = _lastScrollPct;
+      props[`max_scroll_depth_pct`] = _maxScrollPct;
+      props[`scroll_px`] = _lastScrollY;
+      props[`max_scroll_px`] = _maxScrollY;
+      props[`content_height_px`] = _contentH;
+      props[`scroll_direction_changes`] = _directionChanges;
+      props[`scroll_max_velocity`] = Math.round(_maxVelocity * 1000); // px/s
+      props[`resize_count`] = _resizeCount;
+      props[`viewport_width_px`] = _lastWidth;
+      props[`viewport_height_px`] = _lastHeight;
     }
     if (trackVisibility) {
       snapshotVisibility();
-      props[`${prefix}visible_time_ms`] = _visibleMs;
+      props[`visible_time_ms`] = _visibleMs;
     }
     if (trackTimeOnPage) {
-      props[`${prefix}time_on_page_ms`] = Date.now() - _pageStartAt;
+      props[`time_on_page_ms`] = Date.now() - _pageStartAt;
     }
     return props;
   }
@@ -249,20 +255,20 @@ export function mountPageView(
   let _pendingFirstPage = document.visibilityState !== 'visible';
 
   if (!_pendingFirstPage) {
-    tracker.page({
+    tracker.page<PageViewType>({
       ...buildNavProps(),
       ...buildInitialPageProps(),
-      $plugin_source: 'pageView',
+      $plugin_source: pluginSource.PageView,
     });
     resetMetrics();
   }
 
   // SPA navigation — fire page() with accumulated metrics, then reset.
   const onNavigate = () => {
-    tracker.page({
+    tracker.page<PageViewType>({
       ...buildMetrics(),
       ...buildNavPageProps(),
-      $plugin_source: 'pageView',
+      $plugin_source: pluginSource.PageView,
     });
     resetMetrics();
   };
@@ -309,9 +315,9 @@ export function mountPageView(
         for (const m of _MILESTONES) {
           if (_maxScrollPct >= m && !_milestonesFired.has(m)) {
             _milestonesFired.add(m);
-            tracker.track('$scroll_depth', {
+            tracker.track<ScrollDepthType>('$scroll_depth', {
               depth_pct: m,
-              $plugin_source: 'pageView',
+              $plugin_source: pluginSource.PageView,
             });
           }
         }
@@ -369,10 +375,10 @@ export function mountPageView(
         if (_pendingFirstPage) {
           // Page was prerendered — fire the deferred first page view now.
           _pendingFirstPage = false;
-          tracker.page({
+          tracker.page<PageViewType>({
             ...buildNavProps(),
             ...buildInitialPageProps(),
-            $plugin_source: 'pageView',
+            $plugin_source: pluginSource.PageView,
           });
           resetMetrics(); // starts fresh timers from this moment
           return;
@@ -392,10 +398,10 @@ export function mountPageView(
       if (document.visibilityState !== 'visible') return;
       _pendingFirstPage = false;
       document.removeEventListener('visibilitychange', onceVisible);
-      tracker.page({
+      tracker.page<PageViewType>({
         ...buildNavProps(),
         ...buildInitialPageProps(),
-        $plugin_source: 'pageView',
+        $plugin_source: pluginSource.PageView,
       });
       resetMetrics();
     };
@@ -409,10 +415,11 @@ export function mountPageView(
   const removeBeforeDrainHook = tracker.addBeforeDrainHook(() => {
     if (_pendingFirstPage) return; // page was never made visible — no $page_view to pair with
     if (trackVisibility) snapshotVisibility();
-    tracker.track('$page_leave', {
-      ...buildMetrics(''),
+    tracker.track<PageViewType>('$page_leave', {
+      ...buildMetrics(),
+      ...buildNavPageProps(),
       session_duration_ms: Date.now() - _sessionStartAt,
-      $plugin_source: 'pageView',
+      $plugin_source: pluginSource.PageView,
     }); // no $prev_ prefix — metrics belong to this page
   });
 

@@ -63,6 +63,30 @@ describe('mountValidationError', () => {
     cleanup();
   });
 
+  it('does not deduplicate distinct controls that share the same name', () => {
+    jest.useFakeTimers();
+    document.body.innerHTML = `
+      <form id="f">
+        <input name="choice" type="text" id="choice-a" />
+        <input name="choice" type="text" id="choice-b" />
+      </form>
+    `;
+    const first = document.getElementById('choice-a') as HTMLInputElement;
+    const second = document.getElementById('choice-b') as HTMLInputElement;
+
+    const tracker: any = { track: jest.fn() };
+    const cleanup = mountValidationError(tracker);
+
+    jest.setSystemTime(1_000);
+    first.dispatchEvent(new Event('invalid', { bubbles: false }));
+    second.dispatchEvent(new Event('invalid', { bubbles: false }));
+
+    expect(tracker.track).toHaveBeenCalledTimes(2);
+
+    jest.useRealTimers();
+    cleanup();
+  });
+
   it('removes listener on cleanup', () => {
     document.body.innerHTML = `<input name="field" type="text" id="f" />`;
     const input = document.getElementById('f') as HTMLInputElement;

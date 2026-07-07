@@ -1,4 +1,5 @@
 import type { WinceClient } from '../client';
+import { pluginSource, TextSelectionType } from './types';
 
 /**
  * Text selection plugin.
@@ -29,7 +30,7 @@ export function mountTextSelection(tracker: WinceClient): () => void {
     const text = sel.toString();
     if (text.length < 2) return;
 
-    const anchor     = sel.anchorNode?.parentElement ?? null;
+    const anchor = sel.anchorNode?.parentElement ?? null;
     const contextTag = anchor?.tagName.toLowerCase() ?? 'unknown';
 
     // Walk up DOM to find the nearest [data-track] ancestor.
@@ -37,7 +38,10 @@ export function mountTextSelection(tracker: WinceClient): () => void {
     let el: Element | null = anchor;
     while (el && el !== document.documentElement) {
       const tid = el.getAttribute('data-track');
-      if (tid) { contextTrackId = tid; break; }
+      if (tid) {
+        contextTrackId = tid;
+        break;
+      }
       el = el.parentElement;
     }
 
@@ -50,14 +54,22 @@ export function mountTextSelection(tracker: WinceClient): () => void {
     lastSignature = signature;
     lastEmittedAt = now;
 
-    const props: Record<string, unknown> = {
-      selected_length:     text.length,
+    const props: TextSelectionType = {
+      tag: contextTag,
+      text: text,
+      elements_chain: Array.from(
+        sel.getRangeAt(0).commonAncestorContainer.childNodes,
+      )
+        .map((n) => n.nodeName.toLowerCase())
+        .join(' > '),
+      href: anchor?.closest('a')?.getAttribute('href') ?? undefined,
+      selected_length: text.length,
       context_element_tag: contextTag,
-      $plugin_source:      'textSelection',
+      $plugin_source: pluginSource.CopyPaste,
     };
     if (contextTrackId) props['context_track_id'] = contextTrackId;
 
-    tracker.track('$text_selection', props);
+    tracker.track<TextSelectionType>('$text_selection', props);
   };
 
   document.addEventListener('pointerup', handler);

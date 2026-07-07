@@ -1,4 +1,5 @@
 import type { WinceClient } from '../client';
+import { FormAbandonType, pluginSource } from './types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,14 +28,28 @@ export interface FormAbandonOptions {
 // Defaults
 // ---------------------------------------------------------------------------
 
-const DEFAULT_CAPTURE_FIELDS = ['email', 'tel', 'name', 'address', 'city', 'zip'];
-const DEFAULT_EXCLUDE_TYPES  = ['password', 'hidden'];
-const DEFAULT_MIN_LENGTH     = 2;
+const DEFAULT_CAPTURE_FIELDS = [
+  'email',
+  'tel',
+  'name',
+  'address',
+  'city',
+  'zip',
+];
+const DEFAULT_EXCLUDE_TYPES = ['password', 'hidden'];
+const DEFAULT_MIN_LENGTH = 2;
 
 // Input autocomplete values that indicate payment data — always excluded.
 const EXCLUDED_AUTOCOMPLETE = new Set([
-  'cc-number', 'cc-csc', 'cc-exp', 'cc-exp-month', 'cc-exp-year',
-  'cc-name', 'cc-type', 'current-password', 'new-password',
+  'cc-number',
+  'cc-csc',
+  'cc-exp',
+  'cc-exp-month',
+  'cc-exp-year',
+  'cc-name',
+  'cc-type',
+  'current-password',
+  'new-password',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -54,12 +69,13 @@ function getFieldKey(input: HTMLInputElement): string {
   return input.name || input.id || input.type || 'unknown';
 }
 
-function isCapturable(input: HTMLInputElement, captureFields: string[]): boolean {
-  const key  = getFieldKey(input).toLowerCase();
+function isCapturable(
+  input: HTMLInputElement,
+  captureFields: string[],
+): boolean {
+  const key = getFieldKey(input).toLowerCase();
   const type = (input.type || 'text').toLowerCase();
-  return captureFields.some(
-    (f) => key.includes(f) || type === f,
-  );
+  return captureFields.some((f) => key.includes(f) || type === f);
 }
 
 // ---------------------------------------------------------------------------
@@ -93,8 +109,8 @@ export function mountFormAbandon(
   }
 
   const captureFields = options.captureFields ?? DEFAULT_CAPTURE_FIELDS;
-  const excludeTypes  = options.excludeTypes  ?? DEFAULT_EXCLUDE_TYPES;
-  const minLength     = options.minLength     ?? DEFAULT_MIN_LENGTH;
+  const excludeTypes = options.excludeTypes ?? DEFAULT_EXCLUDE_TYPES;
+  const minLength = options.minLength ?? DEFAULT_MIN_LENGTH;
 
   // Track which forms have been submitted so we can suppress abandon events.
   const submittedForms = new WeakSet<HTMLFormElement>();
@@ -104,11 +120,18 @@ export function mountFormAbandon(
   const dirtyForms = new Set<HTMLFormElement>();
 
   function markDirty(e: Event): void {
-    const input = e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+    const input = e.target as
+      | HTMLInputElement
+      | HTMLTextAreaElement
+      | HTMLSelectElement;
     const form = (input as HTMLInputElement).form;
     if (!form || submittedForms.has(form) || dirtyForms.has(form)) return;
     const val = ((input as HTMLInputElement).value || '').trim();
-    if (val.length >= minLength && !isExcluded(input as HTMLInputElement, excludeTypes) && isCapturable(input as HTMLInputElement, captureFields)) {
+    if (
+      val.length >= minLength &&
+      !isExcluded(input as HTMLInputElement, excludeTypes) &&
+      isCapturable(input as HTMLInputElement, captureFields)
+    ) {
       dirtyForms.add(form);
     }
   }
@@ -173,7 +196,7 @@ export function mountFormAbandon(
 
   observer.observe(document.body ?? document.documentElement, {
     childList: true,
-    subtree:   true,
+    subtree: true,
   });
 
   const onPageHide = () => {
@@ -195,14 +218,19 @@ export function mountFormAbandon(
 
       if (fieldsFilled.size === 0) continue;
 
-      tracker.track('$form_abandon', {
-        form_id:       f.id                         || undefined,
-        form_name:     f.name                       || undefined,
-        form_action:   f.getAttribute('action')     || undefined,
-        fields_filled: Array.from(fieldsFilled),
-        field_count:   fieldsFilled.size,
-        $plugin_source: 'formAbandon',
-      }, undefined, { priority: 'high' });
+      tracker.track<FormAbandonType>(
+        '$form_abandon',
+        {
+          form_id: f.id || undefined,
+          form_name: f.name || undefined,
+          form_action: f.getAttribute('action') || undefined,
+          fields_filled: Array.from(fieldsFilled),
+          field_count: fieldsFilled.size,
+          $plugin_source: pluginSource.FormAbandon,
+        },
+        undefined,
+        { priority: 'high' },
+      );
     }
   };
 

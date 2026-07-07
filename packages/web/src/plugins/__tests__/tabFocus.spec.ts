@@ -27,7 +27,10 @@ describe('mountTabFocus — legacy mode (rollupIntervalMs: 0)', () => {
     setVisibility(true);
     document.dispatchEvent(new Event('visibilitychange'));
 
-    expect(tracker.track).toHaveBeenCalledWith('$tab_blur', { $plugin_source: 'tabFocus' });
+    expect(tracker.track).toHaveBeenCalledWith('$tab_blur', expect.objectContaining({
+      blurred_at: expect.any(Number),
+      $plugin_source: 'tabFocus',
+    }));
     cleanup();
   });
 
@@ -51,6 +54,27 @@ describe('mountTabFocus — legacy mode (rollupIntervalMs: 0)', () => {
     cleanup();
   });
 
+  it('does not mutate the blur payload when focus is emitted later', () => {
+    const tracker: any = { track: jest.fn() };
+    const cleanup = mountTabFocus(tracker, { rollupIntervalMs: 0 });
+
+    jest.setSystemTime(1_000);
+    setVisibility(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    const blurPayload = tracker.track.mock.calls[0][1];
+
+    jest.setSystemTime(4_000);
+    setVisibility(false);
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(blurPayload).toEqual({
+      blurred_at: 1_000,
+      $plugin_source: 'tabFocus',
+    });
+    cleanup();
+  });
+
   it('does not emit $tab_focus when visibilitychange fires visible without a prior blur', () => {
     const tracker: any = { track: jest.fn() };
     const cleanup = mountTabFocus(tracker, { rollupIntervalMs: 0 });
@@ -71,7 +95,10 @@ describe('mountTabFocus — legacy mode (rollupIntervalMs: 0)', () => {
     document.dispatchEvent(new Event('visibilitychange'));
 
     expect(tracker.track).toHaveBeenCalledTimes(1);
-    expect(tracker.track).toHaveBeenCalledWith('$tab_blur', { $plugin_source: 'tabFocus' });
+    expect(tracker.track).toHaveBeenCalledWith('$tab_blur', expect.objectContaining({
+      blurred_at: expect.any(Number),
+      $plugin_source: 'tabFocus',
+    }));
     cleanup();
   });
 
@@ -110,27 +137,29 @@ describe('mountTabFocus — rollup mode', () => {
 
   it('emits $tab_focus_rollup with counts after interval when blur occurred', () => {
     const tracker: any = { track: jest.fn() };
-    jest.setSystemTime(0);
+    let now = 0;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
     const cleanup = mountTabFocus(tracker, { rollupIntervalMs: 60_000 });
 
     // Blur at t=10s
-    jest.setSystemTime(10_000);
+    now = 10_000;
     setVisibility(true);
     document.dispatchEvent(new Event('visibilitychange'));
 
     // Focus at t=20s (10s away)
-    jest.setSystemTime(20_000);
+    now = 20_000;
     setVisibility(false);
     document.dispatchEvent(new Event('visibilitychange'));
 
     // Advance to interval boundary
-    jest.setSystemTime(60_000);
+    now = 60_000;
     jest.advanceTimersByTime(60_000);
 
     expect(tracker.track).toHaveBeenCalledTimes(1);
     expect(tracker.track).toHaveBeenCalledWith('$tab_focus_rollup', expect.objectContaining({
       blur_count:     1,
-      away_ms:        expect.any(Number),
+      away_ms:        10_000,
+      focused_ms:     50_000,
       $plugin_source: 'tabFocus',
       reason:         'interval',
     }));
@@ -139,14 +168,15 @@ describe('mountTabFocus — rollup mode', () => {
 
   it('emits $tab_focus_rollup with reason pagehide on page unload', () => {
     const tracker: any = { track: jest.fn() };
-    jest.setSystemTime(0);
+    let now = 0;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
     const cleanup = mountTabFocus(tracker, { rollupIntervalMs: 60_000 });
 
-    jest.setSystemTime(5_000);
+    now = 5_000;
     setVisibility(true);
     document.dispatchEvent(new Event('visibilitychange'));
 
-    jest.setSystemTime(15_000);
+    now = 15_000;
     setVisibility(false);
     document.dispatchEvent(new Event('visibilitychange'));
 
@@ -173,23 +203,34 @@ describe('mountTabFocus — rollup mode', () => {
 
   it('accumulates multiple blur/focus cycles across a window', () => {
     const tracker: any = { track: jest.fn() };
-    jest.setSystemTime(0);
+    let now = 0;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
     const cleanup = mountTabFocus(tracker, { rollupIntervalMs: 60_000 });
 
     for (let i = 1; i <= 3; i++) {
-      jest.setSystemTime(i * 10_000);
+      now = i * 10_000;
       setVisibility(true);
       document.dispatchEvent(new Event('visibilitychange'));
-      jest.setSystemTime(i * 10_000 + 2_000);
+      now = i * 10_000 + 2_000;
       setVisibility(false);
       document.dispatchEvent(new Event('visibilitychange'));
     }
 
-    jest.setSystemTime(60_000);
+    now = 60_000;
     jest.advanceTimersByTime(60_000);
 
     expect(tracker.track).toHaveBeenCalledWith('$tab_focus_rollup', expect.objectContaining({
       blur_count: 3,
+      away_ms: expect.any(Number),
+      focused_ms: expect.any(Number),
+    }));
+    expect(tracker.track).toHaveBeenCalledWith('$tab_focus_rollup', expect.objectContaining({
+      blur_count: 3,
+      away_ms: 6_000,
+      focused_ms: 54_000,
+      window_ms: 60_000,
+      reason: 'interval',
+      $plugin_source: 'tabFocus',
     }));
     cleanup();
   });

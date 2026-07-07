@@ -1,5 +1,6 @@
 import type { WinceClient } from '../client';
 import { useBroadCapture } from './_click-utils';
+import { pluginSource, RageClickType } from './types';
 
 export interface RageClickOptions {
   /** Number of clicks within `windowMs` that triggers a rage-click. Default: 3. */
@@ -11,9 +12,9 @@ export interface RageClickOptions {
 }
 
 interface ClickRecord {
-  count:   number;
+  count: number;
   firstAt: number;
-  timer:   ReturnType<typeof setTimeout>;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 /**
@@ -27,15 +28,18 @@ interface ClickRecord {
  *
  * @returns A cleanup function that removes the event listener.
  */
-export function mountRageClick(tracker: WinceClient, options?: RageClickOptions): () => void {
+export function mountRageClick(
+  tracker: WinceClient,
+  options?: RageClickOptions,
+): () => void {
   if (typeof document === 'undefined') return () => undefined;
 
   const threshold = options?.threshold ?? 3;
-  const windowMs  = options?.windowMs  ?? 300;
-  const idleMs    = options?.idleMs    ?? 500;
+  const windowMs = options?.windowMs ?? 300;
+  const idleMs = options?.idleMs ?? 500;
 
-  const records  = new WeakMap<Element, ClickRecord>();
-  const timers   = new Set<ReturnType<typeof setTimeout>>();
+  const records = new WeakMap<Element, ClickRecord>();
+  const timers = new Set<ReturnType<typeof setTimeout>>();
 
   function armTimer(el: Element, ms: number): ReturnType<typeof setTimeout> {
     const t = setTimeout(() => {
@@ -47,7 +51,7 @@ export function mountRageClick(tracker: WinceClient, options?: RageClickOptions)
   }
 
   const unsub = useBroadCapture((data) => {
-    const el  = data.target as Element;
+    const el = data.target as Element;
     const now = Date.now();
     const rec = records.get(el);
 
@@ -62,26 +66,30 @@ export function mountRageClick(tracker: WinceClient, options?: RageClickOptions)
         timers.delete(rec.timer);
         records.delete(el);
 
-        const props: Record<string, unknown> = {
-          tag:            data.tag,
-          text:           data.text,
+        const props: RageClickType = {
+          tag: data.tag,
+          text: data.text,
           elements_chain: data.elements_chain,
-          count:          rec.count,
-          first_at:       rec.firstAt,
-          $plugin_source: 'rageClick',
+          count: rec.count,
+          first_at: rec.firstAt,
+          $plugin_source: pluginSource.RageClick,
         };
 
-        if (data.href)    props['href']     = data.href;
+        if (data.href) props['href'] = data.href;
         if (data.trackId) props['track_id'] = data.trackId;
 
         // Own-property guard — avoids prototype pollution via …data.attrs spread.
+        const attrs: Record<string, unknown> = {};
         for (const k of Object.keys(data.attrs)) {
           if (Object.prototype.hasOwnProperty.call(data.attrs, k)) {
-            props[k] = data.attrs[k];
+            attrs[k] = data.attrs[k];
           }
         }
+        if (Object.keys(attrs).length > 0) props['attrs'] = attrs;
 
-        tracker.track('$rage_click', props, undefined, { priority: 'critical' });
+        tracker.track<RageClickType>('$rage_click', props, undefined, {
+          priority: 'critical',
+        });
       }
     } else {
       if (rec) {
@@ -89,9 +97,9 @@ export function mountRageClick(tracker: WinceClient, options?: RageClickOptions)
         timers.delete(rec.timer);
       }
       records.set(el, {
-        count:   1,
+        count: 1,
         firstAt: now,
-        timer:   armTimer(el, idleMs),
+        timer: armTimer(el, idleMs),
       });
     }
   });
@@ -102,4 +110,3 @@ export function mountRageClick(tracker: WinceClient, options?: RageClickOptions)
     timers.clear();
   };
 }
-
