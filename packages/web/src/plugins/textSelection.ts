@@ -65,7 +65,7 @@ export function mountTextSelection(tracker: WinceClient): () => void {
       href: anchor?.closest('a')?.getAttribute('href') ?? undefined,
       selected_length: text.length,
       context_element_tag: contextTag,
-      $plugin_source: pluginSource.CopyPaste,
+      $plugin_source: pluginSource.TextSelection,
     };
     if (contextTrackId) props['context_track_id'] = contextTrackId;
 

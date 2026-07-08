@@ -4,11 +4,11 @@ import { createDedupe } from './clientDedupe';
 import { getOrCreateWindowId } from './_windowId';
 import { consent as globalConsent, ConsentManager, type ConsentProvider } from '@wince/consent';
 import type { PersonProps } from '@wince/core';
-
+import { TrackEventPayload } from '@wince/types';
 export interface BaseClientConfig {
   consent?: ConsentProvider | null;
   fetch?: (url: string, init: RequestInit) => Promise<Response>;
-  onEventDropped?: (reason: DropReason, event?: Partial<Record<string, unknown>>) => void;
+  onEventDropped?: (reason: DropReason, event?: Partial<TrackEventPayload>) => void;
   enrichmentReady?: boolean;
 }
 
@@ -16,7 +16,7 @@ export abstract class BaseClient {
   protected _transport!: Transport;
   protected readonly _consent: ConsentProvider | null;
   protected readonly _windowId: string;
-  protected readonly _onEventDropped?: (reason: DropReason, event?: Partial<Record<string, unknown>>) => void;
+  protected readonly _onEventDropped?: (reason: DropReason, event?: Partial<TrackEventPayload>) => void;
   protected readonly _diag = { sent: 0, droppedByReason: {} as Partial<Record<DropReason, number>> };
   protected readonly _fetch?: (url: string, init: RequestInit) => Promise<Response>;
   protected _enrichmentReady: boolean;

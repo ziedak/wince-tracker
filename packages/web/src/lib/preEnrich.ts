@@ -1,18 +1,18 @@
-import { type TrackEvent } from '@wince/core';
+import { type TrackEventPayload } from '@wince/types';
 export function applyEnrichmentOnceToEvents(
-  events: TrackEvent[],
+  events: TrackEventPayload[],
   enrichmentProps?: Record<string, unknown>,
   enrichmentPersonProps?: {
     $set?: Record<string, unknown>;
     $set_once?: Record<string, unknown>;
   },
-): { events: TrackEvent[]; applied: boolean } {
-  const out: TrackEvent[] = [];
+): { events: TrackEventPayload[]; applied: boolean } {
+  const out: TrackEventPayload[] = [];
   let applied = false;
   for (const ev of events) {
     if (
       !applied &&
-      ev.t !== '$identify' &&
+      ev.n !== '$identify' &&
       (enrichmentProps || enrichmentPersonProps)
     ) {
       const newEv = {

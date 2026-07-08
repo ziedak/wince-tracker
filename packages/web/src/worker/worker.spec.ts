@@ -1,7 +1,7 @@
 import { WorkerClient, initWithWorker } from './client';
 import { WinceClient } from '../client';
 import type { MainToWorkerMsg, WorkerToMainMsg } from './messages';
-import type { TrackEvent } from '@wince/core';
+import { TrackEventPayload } from '@wince/types';
 
 // ---------------------------------------------------------------------------
 // MockWorker — simulates the browser Worker API
@@ -9,7 +9,7 @@ import type { TrackEvent } from '@wince/core';
 
 class MockWorker {
   onmessage: ((e: MessageEvent) => void) | null = null;
-  onerror:   ((e: ErrorEvent)   => void) | null = null;
+  onerror: ((e: ErrorEvent) => void) | null = null;
   terminated = false;
 
   private _sent: MainToWorkerMsg[] = [];
@@ -39,24 +39,24 @@ class MockWorker {
 
 function makeFetch(status = 200) {
   return jest.fn().mockResolvedValue({
-    ok:      status >= 200 && status < 300,
+    ok: status >= 200 && status < 300,
     status,
     headers: { get: () => null },
-    body:    null,
+    body: null,
   } as unknown as Response);
 }
 
 function makeWorkerClient() {
   const mockWorker = new MockWorker();
-  const fetchFn    = makeFetch();
-  const client     = new WorkerClient(
+  const fetchFn = makeFetch();
+  const client = new WorkerClient(
     {
-      endpoint:       'https://ingest.test/events',
-      consent:        null,
-      compress:       false,
-      batchSize:      50,
+      endpoint: 'https://ingest.test/events',
+      consent: null,
+      compress: false,
+      batchSize: 50,
       batchTimeoutMs: 100,
-      fetch:          fetchFn,
+      fetch: fetchFn,
     },
     mockWorker as unknown as Worker,
   );
@@ -79,16 +79,21 @@ describe('WorkerClient — initialisation', () => {
     const mockWorker = new MockWorker();
     new WorkerClient(
       {
-        endpoint:             'https://x.test',
-        consent:              null,
-        compress:             false,
+        endpoint: 'https://x.test',
+        consent: null,
+        compress: false,
         sessionIdleTimeoutMs: 60_000,
-        sampleRate:           0.5,
-        fetch:                makeFetch(),
+        sampleRate: 0.5,
+        fetch: makeFetch(),
       },
       mockWorker as unknown as Worker,
     );
-    const initMsg = mockWorker.sentMessages().find((m) => m.type === 'init') as Extract<MainToWorkerMsg, { type: 'init' }>;
+    const initMsg = mockWorker
+      .sentMessages()
+      .find((m) => m.type === 'init') as Extract<
+      MainToWorkerMsg,
+      { type: 'init' }
+    >;
     expect(initMsg.config.sessionIdleTimeoutMs).toBe(60_000);
     expect(initMsg.config.sampleRate).toBe(0.5);
   });
@@ -102,7 +107,12 @@ describe('WorkerClient — track()', () => {
   it('posts a track message to Worker', () => {
     const { client, mockWorker } = makeWorkerClient();
     client.track('page_view', { foo: 1 });
-    const trackMsg = mockWorker.sentMessages().find((m) => m.type === 'track') as Extract<MainToWorkerMsg, { type: 'track' }>;
+    const trackMsg = mockWorker
+      .sentMessages()
+      .find((m) => m.type === 'track') as Extract<
+      MainToWorkerMsg,
+      { type: 'track' }
+    >;
     expect(trackMsg).toBeDefined();
     expect(trackMsg.name).toBe('page_view');
     expect(trackMsg.props).toEqual({ foo: 1 });
@@ -110,25 +120,31 @@ describe('WorkerClient — track()', () => {
 
   it('queues the enriched event in the Transport when Worker replies', async () => {
     const { client, mockWorker, fetchFn } = makeWorkerClient();
-    const enrichedEvent: TrackEvent = {
+    const enrichedEvent: TrackEventPayload = {
       eid: '01975e3a-0001-7000-8000-000000000001',
-      seq: 0, t: 'page_view', ts: Date.now(),
+      seq: 0,
+      n: 'page_view',
+      ts: Date.now(),
       sid: '01975e3a-0001-7000-8000-000000000002',
       anon: '01975e3a-0001-7000-8000-000000000003',
     };
 
     // Auto-reply flush_ack whenever a flush ping arrives
-    jest.spyOn(mockWorker, 'postMessage').mockImplementation((msg: MainToWorkerMsg) => {
-      if (msg.type === 'flush') {
-        mockWorker.simulateIncoming({ type: 'flush_ack', seq: msg.seq });
-      }
-    });
+    jest
+      .spyOn(mockWorker, 'postMessage')
+      .mockImplementation((msg: MainToWorkerMsg) => {
+        if (msg.type === 'flush') {
+          mockWorker.simulateIncoming({ type: 'flush_ack', seq: msg.seq });
+        }
+      });
 
     mockWorker.simulateIncoming({ type: 'enriched', event: enrichedEvent });
     await client.flush();
 
     expect(fetchFn).toHaveBeenCalledTimes(1);
-    const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as { events: TrackEvent[] };
+    const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as {
+      events: TrackEventPayload[];
+    };
     expect(envelope.events[0].eid).toBe(enrichedEvent.eid);
   });
 
@@ -137,16 +153,25 @@ describe('WorkerClient — track()', () => {
     const mockConsent = {
       getStatus: () => -1 as const,
       isGranted: () => false,
-      isDenied:  () => false,
+      isDenied: () => false,
       isPending: () => true,
-      onChange:  () => () => {/**/},
+      onChange: () => () => {
+        /**/
+      },
     };
     new WorkerClient(
-      { endpoint: 'https://x.test', consent: mockConsent, compress: false, fetch: makeFetch() },
+      {
+        endpoint: 'https://x.test',
+        consent: mockConsent,
+        compress: false,
+        fetch: makeFetch(),
+      },
       mockWorker as unknown as Worker,
     ).track('ev');
 
-    const trackMsgs = mockWorker.sentMessages().filter((m) => m.type === 'track');
+    const trackMsgs = mockWorker
+      .sentMessages()
+      .filter((m) => m.type === 'track');
     expect(trackMsgs).toHaveLength(0);
   });
 });
@@ -160,28 +185,37 @@ describe('WorkerClient — flush()', () => {
     const { client, mockWorker, fetchFn } = makeWorkerClient();
 
     // Simulate Worker enriching an event, then acking the flush
-    const enrichedEvent: TrackEvent = {
+    const enrichedEvent: TrackEventPayload = {
       eid: '01975e3a-0002-7000-8000-000000000001',
-      seq: 0, t: 'click', ts: Date.now(),
+      seq: 0,
+      n: '$click',
+      ts: Date.now(),
       sid: '01975e3a-0002-7000-8000-000000000002',
       anon: '01975e3a-0002-7000-8000-000000000003',
     };
 
     // When the Worker receives the flush ping, reply with enriched then ack
     const origPostMessage = mockWorker.postMessage.bind(mockWorker);
-    jest.spyOn(mockWorker, 'postMessage').mockImplementation((msg: MainToWorkerMsg) => {
-      origPostMessage(msg);
-      if (msg.type === 'flush') {
-        // Simulate: Worker had already processed a prior 'track' and sends enriched first
-        mockWorker.simulateIncoming({ type: 'enriched', event: enrichedEvent });
-        mockWorker.simulateIncoming({ type: 'flush_ack', seq: msg.seq });
-      }
-    });
+    jest
+      .spyOn(mockWorker, 'postMessage')
+      .mockImplementation((msg: MainToWorkerMsg) => {
+        origPostMessage(msg);
+        if (msg.type === 'flush') {
+          // Simulate: Worker had already processed a prior 'track' and sends enriched first
+          mockWorker.simulateIncoming({
+            type: 'enriched',
+            event: enrichedEvent,
+          });
+          mockWorker.simulateIncoming({ type: 'flush_ack', seq: msg.seq });
+        }
+      });
 
     await client.flush();
 
     expect(fetchFn).toHaveBeenCalledTimes(1);
-    const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as { events: TrackEvent[] };
+    const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as {
+      events: TrackEventPayload[];
+    };
     expect(envelope.events[0].eid).toBe(enrichedEvent.eid);
   });
 });
@@ -194,26 +228,32 @@ describe('WorkerClient — IDB replay', () => {
   it('forwards pending events from Worker to Transport', async () => {
     const { client, mockWorker, fetchFn } = makeWorkerClient();
 
-    const pendingEvent: TrackEvent = {
+    const pendingEvent: TrackEventPayload = {
       eid: '01975e3a-0003-7000-8000-000000000001',
-      seq: 0, t: 'add_to_cart', ts: Date.now(),
+      seq: 0,
+      n: '$add_to_cart',
+      ts: Date.now(),
       sid: '01975e3a-0003-7000-8000-000000000002',
       anon: '01975e3a-0003-7000-8000-000000000003',
     };
 
     // Auto-reply flush_ack whenever a flush ping arrives
-    jest.spyOn(mockWorker, 'postMessage').mockImplementation((msg: MainToWorkerMsg) => {
-      if (msg.type === 'flush') {
-        mockWorker.simulateIncoming({ type: 'flush_ack', seq: msg.seq });
-      }
-    });
+    jest
+      .spyOn(mockWorker, 'postMessage')
+      .mockImplementation((msg: MainToWorkerMsg) => {
+        if (msg.type === 'flush') {
+          mockWorker.simulateIncoming({ type: 'flush_ack', seq: msg.seq });
+        }
+      });
 
     // Simulate Worker sending back pending IDB events
     mockWorker.simulateIncoming({ type: 'pending', events: [pendingEvent] });
     await client.flush();
 
     expect(fetchFn).toHaveBeenCalled();
-    const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as { events: TrackEvent[] };
+    const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as {
+      events: TrackEventPayload[];
+    };
     expect(envelope.events.some((e) => e.eid === pendingEvent.eid)).toBe(true);
   });
 });
@@ -226,11 +266,13 @@ describe('WorkerClient — close()', () => {
   it('terminates the Worker after close()', async () => {
     const { client, mockWorker } = makeWorkerClient();
     // Simulate flush_ack so close() can resolve
-    jest.spyOn(mockWorker, 'postMessage').mockImplementation((msg: MainToWorkerMsg) => {
-      if (msg.type === 'flush') {
-        mockWorker.simulateIncoming({ type: 'flush_ack', seq: msg.seq });
-      }
-    });
+    jest
+      .spyOn(mockWorker, 'postMessage')
+      .mockImplementation((msg: MainToWorkerMsg) => {
+        if (msg.type === 'flush') {
+          mockWorker.simulateIncoming({ type: 'flush_ack', seq: msg.seq });
+        }
+      });
     await client.close();
     expect(mockWorker.terminated).toBe(true);
   });
@@ -244,7 +286,12 @@ describe('WorkerClient — identify() / reset()', () => {
   it('posts identify message to Worker', () => {
     const { client, mockWorker } = makeWorkerClient();
     client.identify('user-123');
-    const msg = mockWorker.sentMessages().find((m) => m.type === 'identify') as Extract<MainToWorkerMsg, { type: 'identify' }>;
+    const msg = mockWorker
+      .sentMessages()
+      .find((m) => m.type === 'identify') as Extract<
+      MainToWorkerMsg,
+      { type: 'identify' }
+    >;
     expect(msg).toBeDefined();
     expect(msg.uid).toBe('user-123');
   });
@@ -271,7 +318,12 @@ describe('initWithWorker — fallback', () => {
     const origWorker = (globalThis as Record<string, unknown>).Worker;
     (globalThis as Record<string, unknown>).Worker = undefined;
 
-    const result = initWithWorker({ endpoint: 'https://x.test', consent: null, compress: false, fetch: makeFetch() });
+    const result = initWithWorker({
+      endpoint: 'https://x.test',
+      consent: null,
+      compress: false,
+      fetch: makeFetch(),
+    });
     expect(result).toBeInstanceOf(WinceClient);
 
     (globalThis as Record<string, unknown>).Worker = origWorker;
@@ -281,19 +333,29 @@ describe('initWithWorker — fallback', () => {
   it('creates a WorkerClient when Worker is available', () => {
     const origWorker = (globalThis as Record<string, unknown>).Worker;
     const workerInstance = new MockWorker();
-    const workerCtor = jest.fn().mockImplementation(() => workerInstance as unknown as Worker);
-    (globalThis as Record<string, unknown>).Worker = workerCtor as unknown as typeof Worker;
+    const workerCtor = jest
+      .fn()
+      .mockImplementation(() => workerInstance as unknown as Worker);
+    (globalThis as Record<string, unknown>).Worker =
+      workerCtor as unknown as typeof Worker;
 
     try {
       const result = initWithWorker(
-        { endpoint: 'https://x.test', consent: null, compress: false, fetch: makeFetch() },
+        {
+          endpoint: 'https://x.test',
+          consent: null,
+          compress: false,
+          fetch: makeFetch(),
+        },
         './tracker.worker.js',
       );
 
       expect(result).toBeInstanceOf(WorkerClient);
       expect(workerCtor).toHaveBeenCalledTimes(1);
       expect(workerCtor.mock.calls[0][0]).toBeInstanceOf(URL);
-      expect((workerCtor.mock.calls[0][0] as URL).href).toContain('tracker.worker.js');
+      expect((workerCtor.mock.calls[0][0] as URL).href).toContain(
+        'tracker.worker.js',
+      );
     } finally {
       (globalThis as Record<string, unknown>).Worker = origWorker;
     }
@@ -301,9 +363,18 @@ describe('initWithWorker — fallback', () => {
 
   it('returns a WinceClient when Worker constructor throws', () => {
     const origWorker = (globalThis as Record<string, unknown>).Worker;
-    (globalThis as Record<string, unknown>).Worker = class { constructor() { throw new Error('CSP'); } };
+    (globalThis as Record<string, unknown>).Worker = class {
+      constructor() {
+        throw new Error('CSP');
+      }
+    };
 
-    const result = initWithWorker({ endpoint: 'https://x.test', consent: null, compress: false, fetch: makeFetch() });
+    const result = initWithWorker({
+      endpoint: 'https://x.test',
+      consent: null,
+      compress: false,
+      fetch: makeFetch(),
+    });
     expect(result).toBeInstanceOf(WinceClient);
 
     (globalThis as Record<string, unknown>).Worker = origWorker;

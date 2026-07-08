@@ -1,9 +1,13 @@
 export interface EnrichmentResult {
   uid?: string;
-  props?: Record<string, unknown>;
-  personProps?: { $set?: Record<string, unknown>; $set_once?: Record<string, unknown> };
+  props?: Record<string, unknown>; // TODO: need to define a more specific type for props
+  personProps?: {
+    $set?: Record<string, unknown>;
+    $set_once?: Record<string, unknown>;
+  }; // TODO: need to define a more specific type for personProps
 }
 
+// TODO: add a cache layer to avoid fetching enrichment multiple times for the same anon/session
 export async function fetchEnrichment(
   url: string,
   getAnon: () => string | undefined,
@@ -15,12 +19,18 @@ export async function fetchEnrichment(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    const fetchUrl = new URL(url, typeof location !== 'undefined' ? location.href : undefined);
+    const fetchUrl = new URL(
+      url,
+      typeof location !== 'undefined' ? location.href : undefined,
+    );
     fetchUrl.searchParams.set('anon', getAnon() ?? '');
     fetchUrl.searchParams.set('session', getSession() ?? '');
 
     const fn = fetchFn ?? fetch;
-    const resp = await fn(fetchUrl.toString(), { signal: controller.signal, method: 'GET' });
+    const resp = await fn(fetchUrl.toString(), {
+      signal: controller.signal,
+      method: 'GET',
+    });
     clearTimeout(timer);
 
     if (!resp.ok) return undefined;
@@ -28,10 +38,14 @@ export async function fetchEnrichment(
     if (!raw || typeof raw !== 'object') return undefined;
 
     const data = raw as Record<string, unknown>;
-    const $set = data.$set instanceof Object && !Array.isArray(data.$set)
-      ? (data.$set as Record<string, unknown>) : undefined;
-    const $set_once = data.$set_once instanceof Object && !Array.isArray(data.$set_once)
-      ? (data.$set_once as Record<string, unknown>) : undefined;
+    const $set =
+      data.$set instanceof Object && !Array.isArray(data.$set)
+        ? (data.$set as Record<string, unknown>)
+        : undefined;
+    const $set_once =
+      data.$set_once instanceof Object && !Array.isArray(data.$set_once)
+        ? (data.$set_once as Record<string, unknown>)
+        : undefined;
     const uid = typeof data.uid === 'string' ? data.uid : undefined;
 
     const { uid: _u, $set: _s, $set_once: _so, ...rest } = data;
@@ -40,7 +54,7 @@ export async function fetchEnrichment(
     return {
       uid,
       props,
-      personProps: ($set || $set_once) ? { $set, $set_once } : undefined,
+      personProps: $set || $set_once ? { $set, $set_once } : undefined,
     };
   } catch {
     return undefined;

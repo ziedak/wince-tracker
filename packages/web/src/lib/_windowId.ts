@@ -14,12 +14,14 @@ export const WINDOW_ID_KEY = 'wince_wid';
 
 export function getOrCreateWindowId(): string {
   try {
-    const stored = typeof sessionStorage !== 'undefined'
-      ? sessionStorage.getItem(WINDOW_ID_KEY)
-      : null;
+    const stored =
+      typeof sessionStorage !== 'undefined'
+        ? sessionStorage.getItem(WINDOW_ID_KEY)
+        : null;
     if (stored) return stored;
     const id = uuidv4();
-    if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(WINDOW_ID_KEY, id);
+    if (typeof sessionStorage !== 'undefined')
+      sessionStorage.setItem(WINDOW_ID_KEY, id);
     return id;
   } catch {
     // sessionStorage blocked (ITP, private browsing, SSR) — in-memory fallback.

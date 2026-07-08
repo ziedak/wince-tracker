@@ -1,4 +1,5 @@
-import type { TrackEvent, PersonProps } from '@wince/core';
+import type {  PersonProps } from '@wince/core';
+import { TrackEventPayload } from '@wince/types';
 
 // ---------------------------------------------------------------------------
 // WorkerConfig — serialisable subset of WinceConfig (no functions)
@@ -52,9 +53,9 @@ export type MainToWorkerMsg =
 
 export type WorkerToMainMsg =
   /** Enriched event ready to be handed to the HTTP Transport. */
-  | { type: 'enriched';   event: TrackEvent }
+  | { type: 'enriched';   event: TrackEventPayload }
   /** Un-acked events loaded from IndexedDB on startup (replay). */
-  | { type: 'pending';    events: TrackEvent[] }
+  | { type: 'pending';    events: TrackEventPayload[] }
   /** Reply to a `flush` message. All enriched events up to this point have been posted. */
   | { type: 'flush_ack';  seq: number }
   /** Reply to an `idb_size_request` message. */

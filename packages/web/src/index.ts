@@ -10,11 +10,10 @@ export { createDefaultTransport } from '@wince/transport';
 export { mountPageView } from './plugins/pageView';
 export type { PageViewOptions } from './plugins/pageView';
 export { mountClick } from './plugins/click';
-export type { ClickData } from './plugins/click';
 export { mountRageClick } from './plugins/rageClick';
 export type { RageClickOptions } from './plugins/rageClick';
 export { mountCart } from './plugins/cart';
-export type { CartEventDetail, CartOptions } from './plugins/cart';
+export type { CartOptions } from './plugins/cart';
 export { mountFormAbandon } from './plugins/formAbandon';
 export type { FormAbandonOptions } from './plugins/formAbandon';
 export { mountErrorCapture } from './plugins/errorCapture';
@@ -48,7 +47,8 @@ export { mountBacktrack } from './plugins/backtrack';
 
 // Intervention feedback loop
 export { mountIntervention } from './plugins/intervention';
-export type { InterventionTracker, InterventionEventProps } from './plugins/intervention';
+export type { InterventionTracker } from './plugins/intervention';
 
 // Web Worker integration (enrichment + IDB persistence off main thread)
 export { WorkerClient, initWithWorker } from './worker/client';
+export * from './plugins/types';

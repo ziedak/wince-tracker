@@ -1,5 +1,5 @@
 import { WinceClient, type WinceConfig } from './client';
-import type { TrackEvent } from '@wince/core';
+import { TrackEventPayload } from '@wince/types';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -31,7 +31,7 @@ function makeClient(overrides: Partial<WinceConfig> = {}) {
 async function getFirstBatch(client: WinceClient, fetchFn: jest.Mock) {
   await client.flush();
   expect(fetchFn).toHaveBeenCalled();
-  const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as { events: TrackEvent[] };
+  const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as { events: TrackEventPayload[] };
   return envelope.events;
 }
 
@@ -45,7 +45,7 @@ describe('WinceClient — page()', () => {
     const client  = makeClient({ fetch: fetchFn });
     client.page();
     const [ev] = await getFirstBatch(client, fetchFn);
-    expect(ev.t).toBe('$page_view');
+    expect(ev.n).toBe('$page_view');
     await client.close();
   });
 
@@ -54,7 +54,7 @@ describe('WinceClient — page()', () => {
     const client  = makeClient({ fetch: fetchFn });
     client.page({ section: 'checkout' });
     const [ev] = await getFirstBatch(client, fetchFn);
-    expect(ev.t).toBe('$page_view');
+    expect(ev.n).toBe('$page_view');
     expect((ev.props as Record<string, unknown>)?.section).toBe('checkout');
     await client.close();
   });
@@ -81,7 +81,7 @@ describe('WinceClient — track()', () => {
     client.track('page_view');
     const batch = await getFirstBatch(client, fetchFn);
     expect(batch).toHaveLength(1);
-    expect(batch[0].t).toBe('page_view');
+    expect(batch[0].n).toBe('page_view');
     await client.close();
   });
 
@@ -125,13 +125,13 @@ describe('WinceClient — track()', () => {
     const fetchFn = makeFetch();
     const client  = makeClient({
       fetch:       fetchFn,
-      beforeTrack: (e: TrackEvent) => (e.t === 'drop_me' ? null : e),
+      beforeTrack: (e: TrackEventPayload) => (e.n === 'drop_me' ? null : e),
     });
     client.track('keep');
     client.track('drop_me');
     const batch = await getFirstBatch(client, fetchFn);
     expect(batch).toHaveLength(1);
-    expect(batch[0].t).toBe('keep');
+    expect(batch[0].n).toBe('keep');
     await client.close();
   });
 
@@ -139,7 +139,7 @@ describe('WinceClient — track()', () => {
     const fetchFn = makeFetch();
     const client  = makeClient({
       fetch:       fetchFn,
-      beforeTrack: (e: TrackEvent) => ({ ...e, props: { ...e.props, extra: 42 } }),
+      beforeTrack: (e: TrackEventPayload) => ({ ...e, props: { ...e.props, extra: 42 } }),
     });
     client.track('ev', { original: true });
     const [ev] = await getFirstBatch(client, fetchFn);
@@ -251,7 +251,7 @@ describe('WinceClient — consent gating', () => {
     consentCb!(1);
     client.track('after_consent');
     const batch = await getFirstBatch(client, fetchFn);
-    expect(batch[0].t).toBe('after_consent');
+    expect(batch[0].n).toBe('after_consent');
     await client.close();
   });
 });

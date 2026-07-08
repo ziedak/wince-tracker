@@ -204,11 +204,11 @@ export class AppElement extends HTMLElement {
     beforeTrack: (event) => {
       this._recordIntercept(
         describeInterceptSource(event.props?.$plugin_source),
-        event.t,
+        event.n,
         pretty(event.props ?? {}),
       );
-      this._record('event', event.t, pretty(event.props ?? {}));
-      this._addQueueEntry(event.t, event.props ?? {});
+      this._record('event', event.n, pretty(event.props ?? {}));
+      this._addQueueEntry(event.n, event.props ?? {});
       this.scheduleDiagnosticsRefresh();
       return event;
     },

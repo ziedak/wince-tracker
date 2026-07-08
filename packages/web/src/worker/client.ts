@@ -27,7 +27,7 @@ import type {
 } from './messages';
 import { buildBaseDiagnostics } from '../lib/diagnostics';
 import { BaseClient } from '../lib/baseClient';
-import { type TrackEvent } from '@wince/core';
+import { type TrackEventPayload } from '@wince/types';
 
 // ---------------------------------------------------------------------------
 // WorkerClient
@@ -46,7 +46,7 @@ export class WorkerClient extends BaseClient {
   private _workerAnon?: string;
   private _workerSession?: string;
   // Enriched events buffered while the enrichment GET is in-flight.
-  private _preEnrichEventBuffer: TrackEvent[] = [];
+  private _preEnrichEventBuffer: TrackEventPayload[] = [];
 
   // idb_size_request round-trip tracking
   private _idbSizeSeq = 0;
@@ -337,8 +337,7 @@ export class WorkerClient extends BaseClient {
         // Clear one-shot enrichment props after applying
         this._enrichmentProps = undefined;
         this._enrichmentPersonProps = undefined;
-        for (const item of events)
-          this._transport.send(item as unknown as Record<string, unknown>);
+        for (const item of events) this._transport.send(item);
       }
       this._maybeStart();
     }
@@ -384,7 +383,7 @@ export class WorkerClient extends BaseClient {
       case 'pending':
         // IDB replay on startup — send events that survived a previous crash.
         for (const event of msg.events) {
-          this._transport.send(event as unknown as Record<string, unknown>);
+          this._transport.send(event);
         }
         break;
 

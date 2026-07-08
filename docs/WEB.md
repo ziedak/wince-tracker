@@ -34,14 +34,14 @@ The client exposes the usual lifecycle methods:
 `BaseClient` is the shared base for the main-thread and worker-backed clients. It:
 
 - stores the consent provider,
-- creates a tab-scoped `window_id`,
+- creates a tab-scoped `wid`,
 - tracks dropped-event counters,
 - gates transport startup until consent and enrichment are ready,
 - keeps a short-lived dedupe cache for repeated identical events.
 
 ### Main-thread client
 
-`WinceClient` builds `TrackEvent` objects on the main thread. It owns:
+`WinceClient` builds `TrackEventPayload` objects on the main thread. It owns:
 
 - the session manager,
 - the identity manager,
@@ -64,9 +64,16 @@ The client exposes the usual lifecycle methods:
 
 The worker path exists so the SDK can continue using `navigator.sendBeacon` on unload while moving the heavier event bookkeeping off the main thread.
 
+### Type Surface
+
+The shared event and plugin prop types live in:
+
+- [packages/core/src/lib/types.ts](../packages/core/src/lib/types.ts) for `TrackEventPayload`, `PersonProps`, `MinimalStore`, and `TrackOptions`
+- [packages/web/src/plugins/types.ts](../packages/web/src/plugins/types.ts) for plugin-specific payloads such as `PageViewType`, `ClickType`, `RageClickType`, `CartEventDetail`, `CartActionType`, `CopyPasteType`, `DeadClickType`, `ExitIntentType`, `FormAbandonType`, `FormInteractionType`, `ElementVisibilityType`, `TabFocusType`, `TabIdleType`, `TextSelectionType`, `NetworkQualityType`, `PerformanceType`, `ValidationErrorType`, `DoubleSubmitType`, `BacktrackType`, and `InterventionType`
+
 ## Event Model
 
-The canonical event schema is `TrackEvent` from [packages/core/src/lib/types.ts](../packages/core/src/lib/types.ts).
+The canonical event schema is `TrackEventPayload` from [packages/core/src/lib/types.ts](../packages/core/src/lib/types.ts).
 
 ### Required fields
 
@@ -85,15 +92,18 @@ The canonical event schema is `TrackEvent` from [packages/core/src/lib/types.ts]
 - `$set_once` — person properties written only if absent.
 - `url` — document URL at capture time.
 - `ref` — document referrer at capture time.
-- `window_id` — tab-scoped ID.
-- `pageview_id` — current page view ID.
-- `prev_pageview_id` — previous page view ID for `$page_view` hops.
+- `wid` — tab-scoped ID.
+- `pvid` — current page view ID.
+- `prev_pvid` — previous page view ID for `$page_view` hops.
 - `anon_prev` — previous anonymous ID after `reset()`.
 - `offset` — added by transport at encode time.
 - `schema_v` — added by transport at encode time.
+- `_priority` — internal transport hint; stripped before serialization. will be used by the consumer 
 - any additional forward-compatible fields.
 
 `offset` and `schema_v` are transport concerns, not client concerns.
+
+`wid`, `pvid`, and `prev_pvid` are populated by the browser SDK before the event reaches the transport layer.
 
 ## Backend Body Format
 
@@ -110,6 +120,9 @@ The HTTP request body sent to the backend is a JSON envelope with this shape:
       "ts": 1729999999000,
       "sid": "...",
       "anon": "...",
+      "wid": "...",
+      "pvid": "...",
+      "prev_pvid": "...",
       "props": {"...": "..."},
       "offset": 1000,
       "schema_v": 1
@@ -215,27 +228,27 @@ The page-view plugin then adds these source-specific fields:
 - `screen_width_px` and `screen_height_px`.
 - `referrer_type` on the initial page view only. The allowed values are `direct`, `organic_search`, `social`, `internal`, `referral`, `email`, and `paid_search`.
 
-On later SPA navigations, the event also includes the previous-page metrics from `buildMetrics()` with a `$prev_` prefix:
-
-- `$prev_scroll_depth_pct`
-- `$prev_max_scroll_depth_pct`
-- `$prev_scroll_px`
-- `$prev_max_scroll_px`
-- `$prev_content_height_px`
-- `$prev_scroll_direction_changes`
-- `$prev_scroll_max_velocity`
-- `$prev_resize_count`
-- `$prev_viewport_width_px`
-- `$prev_viewport_height_px`
-- `$prev_visible_time_ms`
-- `$prev_time_on_page_ms`
-
 When scroll tracking is enabled, `$scroll_depth` is emitted with:
 
 - `depth_pct` set to `25`, `50`, `75`, or `100`.
 - `$plugin_source: 'pageView'`.
 
-When the page is drained on `pagehide`, `$page_leave` is emitted with the current-page metrics from `buildMetrics('')` plus:
+On later SPA navigations, the event also includes the outgoing page's metrics from `buildMetrics()`:
+
+- `scroll_depth_pct`
+- `max_scroll_depth_pct`
+- `scroll_px`
+- `max_scroll_px`
+- `content_height_px`
+- `scroll_direction_changes`
+- `scroll_max_velocity`
+- `resize_count`
+- `viewport_width_px`
+- `viewport_height_px`
+- `visible_time_ms`
+- `time_on_page_ms`
+
+When the page is drained on `pagehide`, `$page_leave` is emitted with the current-page metrics from `buildMetrics()` plus:
 
 - `scroll_depth_pct`
 - `max_scroll_depth_pct`
@@ -277,21 +290,6 @@ When the page is drained on `pagehide`, `$page_leave` is emitted with the curren
 - `href` when available
 - `track_id` when available
 - all own `data-track-*` attributes except `data-track-label`
-- `$plugin_source: 'rageClick'`
-
-`mountDeadClick()` emits `$dead_click` with:
-
-- `tag`
-- `text`
-- `href`
-- `track_id`
-- `elements_chain`
-- `elapsed_ms`
-- `has_modifier`
-- `$plugin_source: 'deadClick'`
-
-`mountExitIntent()` emits `$exit_intent` with:
-
 - `page` set to `location.pathname`
 - `$plugin_source: 'exitIntent'`
 
@@ -304,10 +302,14 @@ When the page is drained on `pagehide`, `$page_leave` is emitted with the curren
 
 `mountTextSelection()` emits `$text_selection` with:
 
+- `tag`
+- `text`
+- `elements_chain`
 - `selected_length`
 - `context_element_tag`
+- `href`
 - `context_track_id` when the selection is inside a `[data-track]` ancestor
-- `$plugin_source: 'textSelection'`
+- `$plugin_source: 'copyPaste'`
 
 `mountBacktrack()` emits `$backtrack` with:
 
@@ -420,8 +422,8 @@ Payment-card and password fields are excluded from this plugin.
 
 `mountTabFocus()` emits either legacy per-transition events or rollup events depending on `rollupIntervalMs`:
 
-- Legacy mode (`rollupIntervalMs: 0`) emits `$tab_blur` with only `$plugin_source: 'tabFocus'`.
-- Legacy mode also emits `$tab_focus` with `$plugin_source: 'tabFocus'` and optional `away_duration_ms`.
+- Legacy mode (`rollupIntervalMs: 0`) emits `$tab_blur` with `blurred_at` and `$plugin_source: 'tabFocus'`.
+- Legacy mode also emits `$tab_focus` with `blurred_at`, optional `away_duration_ms`, and `$plugin_source: 'tabFocus'`.
 - Rollup mode emits `$tab_focus_rollup` with `blur_count`, `away_ms`, `focused_ms`, `window_ms`, `reason`, and `$plugin_source: 'tabFocus'`.
 
 `mountNetworkQuality()` emits `$network_quality` with:
@@ -538,6 +540,8 @@ The default automatic wiring only mounts page views and clicks.
 
 The worker integration uses a small serialisable protocol.
 
+These message field names are internal wire names. The serialized transport event still uses `wid`, `pvid`, and `prev_pvid`.
+
 ### Main thread to worker
 
 - `init`
@@ -570,5 +574,6 @@ The main thread forwards enriched events into the HTTP transport, while the work
 - [packages/web/src/worker/messages.ts](../packages/web/src/worker/messages.ts)
 - [packages/web/src/plugins/pageView.ts](../packages/web/src/plugins/pageView.ts)
 - [packages/web/src/plugins/click.ts](../packages/web/src/plugins/click.ts)
+- [packages/web/src/plugins/types.ts](../packages/web/src/plugins/types.ts)
 - [packages/transport/src/lib/transport.ts](../packages/transport/src/lib/transport.ts)
 - [packages/core/src/lib/types.ts](../packages/core/src/lib/types.ts)

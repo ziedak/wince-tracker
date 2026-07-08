@@ -11,7 +11,7 @@ import {
   type MinimalStore,
   type TrackOptions,
 } from '@wince/core';
-import type { TrackEventPayload } from '@wince/types';
+import type { EventPriority, TrackEventPayload } from '@wince/types';
 import { createStore, type IStore } from '@wince/storage';
 import type { ConsentProvider } from '@wince/consent';
 import { wireConsent } from './lib/consentWire';
@@ -548,7 +548,7 @@ export class WinceClient extends BaseClient {
     const raw: TrackEventPayload = {
       eid,
       seq: this._seq.next(),
-      t: name,
+      n: name,
       ts: Date.now(),
       sid: this._session.getSid(),
       anon: this._identity.getAnonId(),
@@ -591,6 +591,9 @@ export class WinceClient extends BaseClient {
   }
 
   /** Apply one-shot enrichment props to a raw event, then clear them. */
+  //TODO need review and optimization, the type of the enrichment and _enrichmentPersonProps is not clear
+  // TODO cache the result of enrichement to avoid fetching from server multiple times 
+  //use @wince/cache to cache the result of enrichment
   private _applyEnrichmentOnce(raw: TrackEventPayload): TrackEventPayload {
     if (!this._enrichmentProps && !this._enrichmentPersonProps) return raw;
     const result: TrackEventPayload = {

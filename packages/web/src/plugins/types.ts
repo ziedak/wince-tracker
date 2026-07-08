@@ -18,6 +18,7 @@ export enum pluginSource {
   TabFocus = 'tabFocus',
   TabIdle = 'tabIdle',
   ValidationError = 'validationError',
+  TextSelection = 'textSelection',
 }
 
 export type BacktrackType = {
@@ -313,7 +314,7 @@ export type TextSelectionType = {
   context_element_tag: string;
   href?: string;
   context_track_id?: string;
-  $plugin_source: pluginSource.CopyPaste;
+  $plugin_source: pluginSource.TextSelection;
 };
 
 export type ValidationErrorType = {

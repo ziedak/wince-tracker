@@ -16,26 +16,29 @@ import {
   SequenceCounter,
   SamplingFilter,
   uuidv7,
-  type TrackEvent,
   type PersonProps,
 } from '@wince/core';
 import { DurableQueue } from '@wince/storage';
 import { WorkerCache } from './workerCache';
-import type { MainToWorkerMsg, WorkerToMainMsg, WorkerConfig } from './messages';
-
+import type {
+  MainToWorkerMsg,
+  WorkerToMainMsg,
+  WorkerConfig,
+} from './messages';
+import { TrackEventPayload } from '@wince/types';
 // ---------------------------------------------------------------------------
 // Worker state (initialised by the 'init' message)
 // ---------------------------------------------------------------------------
 
-let session:       SessionManager;
-let identity:      IdentityManager;
-let seq:           SequenceCounter;
-let sampler:       SamplingFilter | undefined;
-let durableQ:      DurableQueue;
-let workerCache:   WorkerCache | undefined;       // kept for consent_change migration
+let session: SessionManager;
+let identity: IdentityManager;
+let seq: SequenceCounter;
+let sampler: SamplingFilter | undefined;
+let durableQ: DurableQueue;
+let workerCache: WorkerCache | undefined; // kept for consent_change migration
 
 // Near-error tracking: events within 30 s of a crash are tagged with $near_error context.
-let _lastErrorEid:   string | undefined;
+let _lastErrorEid: string | undefined;
 let _lastErrorTimer: ReturnType<typeof setTimeout> | undefined;
 let cookielessMode: WorkerConfig['cookieless'];
 
@@ -46,7 +49,7 @@ let cookielessMode: WorkerConfig['cookieless'];
 async function handleInit(config: WorkerConfig): Promise<void> {
   const cache = new WorkerCache();
   await cache.init();
-  workerCache   = cache;
+  workerCache = cache;
   cookielessMode = config.cookieless;
 
   // Determine whether to use persistent storage for session/identity.
@@ -56,13 +59,13 @@ async function handleInit(config: WorkerConfig): Promise<void> {
     config.cookieless !== 'always' &&
     (config.cookieless !== 'on_reject' || initialGranted);
 
-  session  = new SessionManager({
+  session = new SessionManager({
     idleTimeoutMs: config.sessionIdleTimeoutMs,
     maxDurationMs: config.sessionMaxDurationMs,
     store: useStore ? cache : undefined,
   });
   identity = new IdentityManager({ store: useStore ? cache : undefined });
-  seq      = new SequenceCounter();
+  seq = new SequenceCounter();
   durableQ = new DurableQueue();
 
   if (config.sampleRate !== undefined && config.sampleRate < 1) {
@@ -75,39 +78,40 @@ async function handleInit(config: WorkerConfig): Promise<void> {
 // ---------------------------------------------------------------------------
 
 function enrichEvent(
-  name:             string,
-  props:            Record<string, unknown> | undefined,
-  url:              string | undefined,
-  ref:              string | undefined,
-  window_id:        string | undefined,
-  pageview_id:      string | undefined,
+  name: string,
+  props: Record<string, unknown> | undefined,
+  url: string | undefined,
+  ref: string | undefined,
+  window_id: string | undefined,
+  pageview_id: string | undefined,
   prev_pageview_id: string | undefined,
-  personProps?:     PersonProps,
-): TrackEvent {
+  personProps?: PersonProps,
+): TrackEventPayload {
   session.touch();
 
   // Near-error context: tag events that fire within 30 s of an unhandled crash.
-  const finalProps = name !== '$error' && _lastErrorEid
-    ? { $near_error: true, $error_eid: _lastErrorEid, ...props }
-    : props;
+  const finalProps =
+    name !== '$error' && _lastErrorEid
+      ? { $near_error: true, $error_eid: _lastErrorEid, ...props }
+      : props;
 
   const eid = uuidv7();
-  const event: TrackEvent = {
+  const event: TrackEventPayload = {
     eid,
-    seq:  seq.next(),
-    t:    name,
-    ts:   Date.now(),
-    sid:  session.getSid(),
+    seq: seq.next(),
+    n: name,
+    ts: Date.now(),
+    sid: session.getSid(),
     anon: identity.getAnonId(),
-    uid:  identity.getUserId(),
+    uid: identity.getUserId(),
     props: finalProps,
-    $set:      personProps?.$set,
+    $set: personProps?.$set,
     $set_once: personProps?.$set_once,
     url,
     ref,
-    window_id,
-    pageview_id,
-    prev_pageview_id,
+    wid: window_id,
+    pvid: pageview_id,
+    prev_pvid: prev_pageview_id,
     anon_prev: identity.getAndClearAnonPrev(),
   };
 
@@ -115,7 +119,9 @@ function enrichEvent(
   if (name === '$error') {
     _lastErrorEid = eid;
     if (_lastErrorTimer !== undefined) clearTimeout(_lastErrorTimer);
-    _lastErrorTimer = setTimeout(() => { _lastErrorEid = undefined; }, 30_000);
+    _lastErrorTimer = setTimeout(() => {
+      _lastErrorEid = undefined;
+    }, 30_000);
   }
 
   return event;
@@ -127,14 +133,18 @@ function enrichEvent(
 
 async function handleMessage(msg: MainToWorkerMsg): Promise<void> {
   switch (msg.type) {
-
     case 'track': {
       // Sampling check (deterministic: keyed on anonymous ID)
       if (sampler && !sampler.shouldTrack(identity.getAnonId())) return;
 
       const event = enrichEvent(
-        msg.name, msg.props, msg.url, msg.ref,
-        msg.window_id, msg.pageview_id, msg.prev_pageview_id,
+        msg.name,
+        msg.props,
+        msg.url,
+        msg.ref,
+        msg.window_id,
+        msg.pageview_id,
+        msg.prev_pageview_id,
         { $set: msg.$set, $set_once: msg.$set_once },
       );
 
@@ -145,8 +155,8 @@ async function handleMessage(msg: MainToWorkerMsg): Promise<void> {
       // 2. Persist to IndexedDB (fire-and-forget crash recovery).
       //    TODO: add ack mechanism so delivered events are pruned from IDB.
       durableQ.enqueue({
-        eid:        event.eid,
-        payload:    JSON.stringify(event),
+        eid: event.eid,
+        payload: JSON.stringify(event),
         enqueuedAt: event.ts,
       });
       break;
@@ -158,8 +168,13 @@ async function handleMessage(msg: MainToWorkerMsg): Promise<void> {
       // receives person properties — same behaviour as WinceClient.identify().
       if (msg.$set || msg.$set_once) {
         const event = enrichEvent(
-          '$identify', undefined, undefined, undefined,
-          undefined, undefined, undefined,
+          '$identify',
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
           { $set: msg.$set, $set_once: msg.$set_once },
         );
         self.postMessage({ type: 'enriched', event } satisfies WorkerToMainMsg);
@@ -182,16 +197,24 @@ async function handleMessage(msg: MainToWorkerMsg): Promise<void> {
     case 'load_pending': {
       try {
         const persisted = await durableQ.loadPending();
-        const events: TrackEvent[] = persisted.map((p) => {
-          try   { return JSON.parse(p.payload) as TrackEvent; }
-          catch { return null!; }
-        }).filter(Boolean);
+        const events: TrackEventPayload[] = persisted
+          .map((p) => {
+            try {
+              return JSON.parse(p.payload) as TrackEventPayload;
+            } catch {
+              console.warn(
+                `Failed to parse persisted event ${p.payload}, skipping`,
+              );
+              return null;
+            }
+          })
+          .filter((item) => item !== null) as TrackEventPayload[];
 
         const reply: WorkerToMainMsg = { type: 'pending', events };
         self.postMessage(reply);
       } catch (err) {
         const reply: WorkerToMainMsg = {
-          type:    'error',
+          type: 'error',
           message: `load_pending failed: ${(err as Error).message}`,
         };
         self.postMessage(reply);
@@ -214,7 +237,7 @@ async function handleMessage(msg: MainToWorkerMsg): Promise<void> {
         await durableQ.ack(msg.eids);
       } catch (err) {
         const reply: WorkerToMainMsg = {
-          type:    'error',
+          type: 'error',
           message: `ack failed: ${(err as Error).message}`,
         };
         self.postMessage(reply);
@@ -234,10 +257,18 @@ async function handleMessage(msg: MainToWorkerMsg): Promise<void> {
     case 'idb_size_request': {
       try {
         const size = await durableQ.size();
-        const reply: WorkerToMainMsg = { type: 'idb_size_response', seq: msg.seq, size };
+        const reply: WorkerToMainMsg = {
+          type: 'idb_size_response',
+          seq: msg.seq,
+          size,
+        };
         self.postMessage(reply);
       } catch {
-        const reply: WorkerToMainMsg = { type: 'idb_size_response', seq: msg.seq, size: 0 };
+        const reply: WorkerToMainMsg = {
+          type: 'idb_size_response',
+          seq: msg.seq,
+          size: 0,
+        };
         self.postMessage(reply);
       }
       break;
@@ -250,9 +281,11 @@ async function handleMessage(msg: MainToWorkerMsg): Promise<void> {
 // ---------------------------------------------------------------------------
 
 let _initialized = false;
-const _pending:   MainToWorkerMsg[] = [];
+const _pending: MainToWorkerMsg[] = [];
 
-(self as unknown as Worker).onmessage = async (e: MessageEvent<MainToWorkerMsg>) => {
+(self as unknown as Worker).onmessage = async (
+  e: MessageEvent<MainToWorkerMsg>,
+) => {
   const msg = e.data;
 
   if (msg.type === 'init') {
@@ -262,7 +295,7 @@ const _pending:   MainToWorkerMsg[] = [];
     } catch (err) {
       initSucceeded = false;
       const reply: WorkerToMainMsg = {
-        type:    'error',
+        type: 'error',
         message: `Worker init failed: ${(err as Error).message}`,
       };
       self.postMessage(reply);
@@ -275,8 +308,8 @@ const _pending:   MainToWorkerMsg[] = [];
     // Notify the main thread of the stable anon/session IDs so it can include
     // them in the first-party enrichment request (?anon=...&session=...).
     self.postMessage({
-      type:    'identity_snapshot',
-      anon:    identity.getAnonId(),
+      type: 'identity_snapshot',
+      anon: identity.getAnonId(),
       session: session.getSid(),
     } satisfies WorkerToMainMsg);
 

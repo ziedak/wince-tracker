@@ -1,9 +1,9 @@
 /** @jest-environment jsdom */
 
 import { ConsentManager, ConsentStatus } from '@wince/consent';
-import type { TrackEvent } from '@wince/core';
-import type { DropReason, Transport } from '@wince/transport';
 
+import type { DropReason, Transport } from '@wince/transport';
+import { TrackEventPayload } from '@wince/types';
 import { BaseClient } from './baseClient';
 import { getOrCreateWindowId, WINDOW_ID_KEY } from './_windowId';
 import { buildBaseDiagnostics } from './diagnostics';
@@ -100,10 +100,18 @@ describe('buildBaseDiagnostics', () => {
 
 describe('applyEnrichmentOnceToEvents', () => {
   it('applies enrichment only to the first non-identify event', () => {
-    const events: TrackEvent[] = [
-      { t: '$identify', eid: '1', seq: 0, ts: 1, sid: 'sid', anon: 'anon', props: { keep: true } },
+    const events: TrackEventPayload[] = [
       {
-        t: '$page_view',
+        n: '$identify',
+        eid: '1',
+        seq: 0,
+        ts: 1,
+        sid: 'sid',
+        anon: 'anon',
+        props: { keep: true },
+      },
+      {
+        n: '$page_view',
         eid: '2',
         seq: 1,
         ts: 2,
@@ -113,7 +121,7 @@ describe('applyEnrichmentOnceToEvents', () => {
         $set: { tier: 'gold' },
         $set_once: { first_seen: 'event' },
       },
-      { t: 'click', eid: '3', seq: 2, ts: 3, sid: 'sid', anon: 'anon' },
+      { n: '$click', eid: '3', seq: 2, ts: 3, sid: 'sid', anon: 'anon' },
     ];
 
     const result = applyEnrichmentOnceToEvents(
@@ -134,7 +142,9 @@ describe('applyEnrichmentOnceToEvents', () => {
   });
 
   it('returns the original events when no enrichment is provided', () => {
-    const events: TrackEvent[] = [{ t: 'click', eid: '1', seq: 0, ts: 1, sid: 'sid', anon: 'anon' }];
+    const events: TrackEventPayload[] = [
+      { n: '$click', eid: '1', seq: 0, ts: 1, sid: 'sid', anon: 'anon' },
+    ];
 
     const result = applyEnrichmentOnceToEvents(events);
 
@@ -261,7 +271,8 @@ describe('window id helper', () => {
   let originalSessionStorage: Storage | undefined;
 
   beforeEach(() => {
-    originalSessionStorage = (globalThis as Record<string, unknown>).sessionStorage as Storage | undefined;
+    originalSessionStorage = (globalThis as Record<string, unknown>)
+      .sessionStorage as Storage | undefined;
     Object.defineProperty(globalThis, 'sessionStorage', {
       value: createStorageMock(),
       configurable: true,
@@ -289,9 +300,11 @@ describe('window id helper', () => {
   });
 
   it('falls back when sessionStorage throws', () => {
-    const getItemSpy = jest.spyOn(sessionStorage, 'getItem').mockImplementation(() => {
-      throw new Error('blocked');
-    });
+    const getItemSpy = jest
+      .spyOn(sessionStorage, 'getItem')
+      .mockImplementation(() => {
+        throw new Error('blocked');
+      });
 
     expect(getOrCreateWindowId()).toMatch(/^[0-9a-f-]{36}$/);
     getItemSpy.mockRestore();
@@ -345,6 +358,12 @@ describe('BaseClient', () => {
     client.drop('consent');
     client.drop('consent');
 
-    expect((client as unknown as { _diag: { droppedByReason: Record<string, number> } })._diag.droppedByReason.consent).toBe(2);
+    expect(
+      (
+        client as unknown as {
+          _diag: { droppedByReason: Record<string, number> };
+        }
+      )._diag.droppedByReason.consent,
+    ).toBe(2);
   });
 });

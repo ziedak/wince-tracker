@@ -99,6 +99,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@nx/jest": "22.7.5",
+        "@wince/types": "workspace:*",
       },
     },
     "packages/observability": {
@@ -128,6 +129,9 @@
     "packages/types": {
       "name": "@wince/types",
       "version": "0.0.1",
+      "dependencies": {
+        "@nx/jest": "22.7.5",
+      },
     },
     "packages/utils": {
       "name": "@wince/utils",
@@ -144,8 +148,9 @@
         "@wince/cache": "workspace:*",
         "@wince/consent": "workspace:*",
         "@wince/core": "workspace:*",
-        "@wince/storage": "0.0.1",
+        "@wince/storage": "workspace:*",
         "@wince/transport": "workspace:*",
+        "@wince/types": "workspace:*",
         "fflate": "0.8.3",
       },
       "devDependencies": {

@@ -1,4 +1,5 @@
-import type { WinceClient, TrackOptions } from '../client';
+import { TrackOptions } from '@wince/core';
+import type { WinceClient } from '../client';
 import {
   CartActionType,
   CartCheckoutAbandonType,
