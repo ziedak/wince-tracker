@@ -122,7 +122,12 @@
       "dependencies": {
         "@nx/jest": "22.7.5",
         "@wince/compress": "workspace:*",
+        "@wince/types": "workspace:*",
       },
+    },
+    "packages/types": {
+      "name": "@wince/types",
+      "version": "0.0.1",
     },
     "packages/utils": {
       "name": "@wince/utils",
@@ -976,6 +981,8 @@
     "@wince/storage": ["@wince/storage@workspace:packages/storage"],
 
     "@wince/transport": ["@wince/transport@workspace:packages/transport"],
+
+    "@wince/types": ["@wince/types@workspace:packages/types"],
 
     "@wince/utils": ["@wince/utils@workspace:packages/utils"],
 

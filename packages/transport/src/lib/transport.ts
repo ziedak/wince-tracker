@@ -1,27 +1,30 @@
 import { compressSync } from '@wince/compress';
 import { Exporter } from './exporter';
 import { HttpSender } from './httpSender';
-import type { EventPayload, TransportOptions } from './types';
+import type { TransportOptions } from './types';
 import { BeaconClient } from './beaconClient';
+import { TrackEventPayload } from '@wince/types';
 
 const SCHEMA_VERSION = 1;
 
-function buildEnvelope(batch: EventPayload[]): string {
+function buildEnvelope(batch: TrackEventPayload[]): string {
   const sent_at = Date.now();
   const events = batch.map((e) => {
-    const ts = typeof e['ts'] === 'number' ? (e['ts'] as number) : sent_at;
+    const ts = e.ts ? (e['ts'] as number) : sent_at;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { _priority, ...rest } = e as EventPayload & { _priority?: unknown };
+    const { _priority, ...rest } = e as TrackEventPayload & {
+      _priority?: unknown;
+    };
     return { ...rest, offset: sent_at - ts, schema_v: SCHEMA_VERSION };
   });
   return JSON.stringify({ sent_at, events });
 }
 
 export class Transport {
-  private readonly _critical: Exporter<EventPayload>;
-  private readonly _high:     Exporter<EventPayload>;
-  private readonly _normal:   Exporter<EventPayload>;
-  private readonly _url:      string;
+  private readonly _critical: Exporter<TrackEventPayload>;
+  private readonly _high: Exporter<TrackEventPayload>;
+  private readonly _normal: Exporter<TrackEventPayload>;
+  private readonly _url: string;
   private readonly _useCompression: boolean;
 
   constructor(opts: TransportOptions) {
@@ -38,26 +41,28 @@ export class Transport {
       fetch: opts.fetch,
     });
 
-    const encode = async (batch: EventPayload[]) => {
+    const encode = async (batch: TrackEventPayload[]) => {
       const payload = buildEnvelope(batch);
       return this._useCompression ? compressSync(payload) : payload;
     };
 
     const retryOpts = {
-      attempts:    opts.retry?.attempts,
+      attempts: opts.retry?.attempts,
       baseDelayMs: opts.retry?.baseDelayMs,
-      maxDelayMs:  opts.retry?.maxDelayMs,
-      factor:      opts.retry?.factor,
-      jitter:      opts.retry?.jitter,
+      maxDelayMs: opts.retry?.maxDelayMs,
+      factor: opts.retry?.factor,
+      jitter: opts.retry?.jitter,
     };
 
-    const onDropped       = opts.onDropped;
+    const onDropped = opts.onDropped;
     const onBatchDelivered = opts.onBatchDelivered
-      ? (items: EventPayload[]) => {
+      ? (items: TrackEventPayload[]) => {
           const eids = items
-            .map((e) => typeof e['eid'] === 'string' ? (e['eid'] as string) : null)
+            .map((e) =>
+              typeof e['eid'] === 'string' ? (e['eid'] as string) : null,
+            )
             .filter((id): id is string => id !== null);
-          if (eids.length > 0) opts.onBatchDelivered!(eids);
+          if (eids.length > 0) opts.onBatchDelivered?.(eids);
         }
       : undefined;
 
@@ -65,40 +70,40 @@ export class Transport {
     // Events with priority='critical' (exit_intent, rage_click, etc.) are
     // sent immediately on enqueue — never batched. Rate-limited to a burst of
     // 10 to prevent storms (e.g. 50 rage-clicks firing 50 requests).
-    this._critical = new Exporter<EventPayload>({
+    this._critical = new Exporter<TrackEventPayload>({
       sender,
       encode,
-      batchSize:      1,
+      batchSize: 1,
       flushIntervalMs: 0,
-      maxBufferSize:  50,
+      maxBufferSize: 50,
       rateLimit: { bucketSize: 10, refillRate: 10, refillIntervalMs: 1_000 },
-      retry:      retryOpts,
+      retry: retryOpts,
       onDropped,
       onBatchDelivered,
     });
 
     // ── High lane: small batches, 2 s flush. ───────────────────────────────
     // purchase, form_abandon, cart add/remove — important but not unload-critical.
-    this._high = new Exporter<EventPayload>({
+    this._high = new Exporter<TrackEventPayload>({
       sender,
       encode,
-      batchSize:      5,
+      batchSize: 5,
       flushIntervalMs: 2_000,
-      maxBufferSize:  200,
-      retry:      retryOpts,
+      maxBufferSize: 200,
+      retry: retryOpts,
       onDropped,
       onBatchDelivered,
     });
 
     // ── Normal lane: configured batch size + interval. ─────────────────────
     // All other events — scroll depth, clicks, page_view, etc.
-    this._normal = new Exporter<EventPayload>({
+    this._normal = new Exporter<TrackEventPayload>({
       sender,
       encode,
-      batchSize:       opts.batchSize      ?? 10,
+      batchSize: opts.batchSize ?? 10,
       flushIntervalMs: opts.batchTimeoutMs ?? 5_000,
-      maxBufferSize:   opts.maxBufferSize  ?? 500,
-      retry:      retryOpts,
+      maxBufferSize: opts.maxBufferSize ?? 500,
+      retry: retryOpts,
       onDropped,
       onBatchDelivered,
     });
@@ -117,8 +122,8 @@ export class Transport {
    *   - `'high'`     → high lane (2 s flush)
    *   - anything else → normal lane (configured flush interval)
    */
-  send(event: EventPayload): void {
-    const priority = event['_priority'] as string | undefined;
+  send(event: TrackEventPayload): void {
+    const priority = event._priority;
     if (priority === 'critical') {
       this._critical.enqueue(event);
     } else if (priority === 'high') {
@@ -129,11 +134,17 @@ export class Transport {
   }
 
   get queueSize(): number {
-    return this._critical.queueSize + this._high.queueSize + this._normal.queueSize;
+    return (
+      this._critical.queueSize + this._high.queueSize + this._normal.queueSize
+    );
   }
 
   get circuitOpen(): boolean {
-    return this._critical.circuitOpen || this._high.circuitOpen || this._normal.circuitOpen;
+    return (
+      this._critical.circuitOpen ||
+      this._high.circuitOpen ||
+      this._normal.circuitOpen
+    );
   }
 
   /**
@@ -174,25 +185,33 @@ export class Transport {
   drain(): void {
     const hasBeacon =
       typeof navigator !== 'undefined' &&
-      typeof (navigator as Navigator & { sendBeacon?: unknown }).sendBeacon === 'function';
+      typeof (navigator as Navigator & { sendBeacon?: unknown }).sendBeacon ===
+        'function';
 
     if (!hasBeacon) {
       void Promise.all([
         this._critical.flush(),
         this._high.flush(),
         this._normal.flush(),
-      ]).catch(() => { /* best-effort */ });
+      ]).catch(() => {
+        /* best-effort */
+      });
       return;
     }
 
     const url = this._url;
     const drainOpts = {
-      encodeSync: (batch: EventPayload[]) => buildEnvelope(batch),
+      encodeSync: (batch: TrackEventPayload[]) => buildEnvelope(batch),
       send: (data: string | Uint8Array) => {
-        const type = typeof data === 'string' ? 'application/json' : 'application/octet-stream';
-        (navigator as Navigator & {
-          sendBeacon: (u: string, b: Blob) => boolean;
-        }).sendBeacon(url, new Blob([data as BlobPart], { type }));
+        const type =
+          typeof data === 'string'
+            ? 'application/json'
+            : 'application/octet-stream';
+        (
+          navigator as Navigator & {
+            sendBeacon: (u: string, b: Blob) => boolean;
+          }
+        ).sendBeacon(url, new Blob([data as BlobPart], { type }));
       },
     };
 
@@ -257,4 +276,3 @@ export function createClientTransport(opts: TransportOptions): Transport {
     onBatchDelivered: opts.onBatchDelivered,
   });
 }
-

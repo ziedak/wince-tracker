@@ -35,6 +35,9 @@
     },
     {
       "path": "./apps/playground"
+    },
+    {
+      "path": "./packages/types"
     }
   ]
 }

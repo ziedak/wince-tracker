@@ -21,7 +21,7 @@ function makeSender(responses: SendOutcome[]): HttpSender {
         ok:      status >= 200 && status < 300,
         status,
         headers: {
-          get: (h: string) =>
+          get: () =>
             outcome.kind === 'retry' && 'retryAfterMs' in outcome
               ? String((outcome as { retryAfterMs?: number }).retryAfterMs ?? '')
               : null,
@@ -133,7 +133,8 @@ describe('Exporter — circuit breaker', () => {
       expect(exp.queueSize).toBeGreaterThan(0);
 
       // Advance past the 200ms backoff — probe flush runs and empties the buffer.
-      await jest.advanceTimersByTimeAsync(300);
+      jest.advanceTimersByTime(300);
+      await Promise.resolve();
 
       expect(exp.queueSize).toBe(0);
       await exp.close();

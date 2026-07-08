@@ -1,5 +1,5 @@
 {
-  "name": "@wince/core",
+  "name": "@wince/types",
   "version": "0.0.1",
   "private": true,
   "sideEffects": false,
@@ -17,7 +17,6 @@
     }
   },
   "dependencies": {
-    "@nx/jest": "22.7.5",
-    "@wince/types": "workspace:*"
+    "@nx/jest": "22.7.5"
   }
 }

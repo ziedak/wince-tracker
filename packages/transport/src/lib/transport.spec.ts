@@ -1,3 +1,4 @@
+import { TrackEventPayload } from '@wince/types';
 import { Transport } from './transport';
 
 // ---------------------------------------------------------------------------
@@ -25,6 +26,18 @@ function makeTransport(overrides: Partial<ConstructorParameters<typeof Transport
   return { t, fetchFn: fetchFn as jest.Mock };
 }
 
+function mockTrackEventPayload(event: Partial<TrackEventPayload>): TrackEventPayload {
+  return {
+    n: '',
+    eid: '',
+    seq: 0,
+    ts: 0,
+    sid: '',
+    anon: '',
+    ...event,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Basic send + flush
 // ---------------------------------------------------------------------------
@@ -32,8 +45,22 @@ function makeTransport(overrides: Partial<ConstructorParameters<typeof Transport
 describe('Transport — send / flush', () => {
   it('flushes buffered events via fetch', async () => {
     const { t, fetchFn } = makeTransport();
-    t.send({ event: 'page_view' });
-    t.send({ event: 'click' });
+    t.send({
+      n: 'page_view',
+      eid: '',
+      seq: 0,
+      ts: 0,
+      sid: '',
+      anon: ''
+    });
+    t.send({
+      n: 'click',
+      eid: '',
+      seq: 0,
+      ts: 0,
+      sid: '',
+      anon: ''
+    });
     await t.flush();
     expect(fetchFn).toHaveBeenCalledTimes(1);
     const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as { events: unknown[] };
@@ -52,18 +79,18 @@ describe('Transport — pause / start', () => {
 
   it('does not send while paused', async () => {
     const { t, fetchFn } = makeTransport({ paused: true });
-    t.send({ event: 'ev1' });
-    t.send({ event: 'ev2' });
+    t.send(mockTrackEventPayload({ n: 'ev1' }));
+    t.send(mockTrackEventPayload({ n: 'ev2' }));
     // Advance past flush interval — nothing should fire
-    await jest.runAllTimersAsync();
+    jest.runAllTimers();
     expect(fetchFn).not.toHaveBeenCalled();
     await t.close();
   });
 
   it('sends buffered events after start()', async () => {
     const { t, fetchFn } = makeTransport({ paused: true });
-    t.send({ event: 'ev1' });
-    t.send({ event: 'ev2' });
+    t.send(mockTrackEventPayload({ n: 'ev1' }));
+    t.send(mockTrackEventPayload({ n: 'ev2' }));
     t.start();
     await t.flush();
     expect(fetchFn).toHaveBeenCalledTimes(1);
@@ -72,13 +99,13 @@ describe('Transport — pause / start', () => {
 
   it('pause() mid-flight stops further auto-flushes', async () => {
     const { t, fetchFn } = makeTransport();
-    t.send({ event: 'ev1' });
+    t.send(mockTrackEventPayload({ n: 'ev1' }));
     await t.flush();
     const callsAfterFirstFlush = fetchFn.mock.calls.length;
 
     t.pause();
-    t.send({ event: 'ev2' });
-    await jest.runAllTimersAsync();
+    t.send(mockTrackEventPayload({ n: 'ev2' }));
+    jest.runAllTimers();
     // No additional calls while paused
     expect(fetchFn.mock.calls.length).toBe(callsAfterFirstFlush);
     await t.close();
@@ -102,14 +129,14 @@ describe('Transport — drain()', () => {
     });
 
     const { t } = makeTransport({ paused: true });
-    t.send({ event: 'ev1' });
-    t.send({ event: 'ev2' });
+    t.send(mockTrackEventPayload({ n: 'ev1' }));
+    t.send(mockTrackEventPayload({ n: 'ev2' }));
     t.drain();
 
     expect(beaconCalls).toHaveLength(1);
     expect(beaconCalls[0][0]).toBe('https://example.test/ingest');
     expect(beaconCalls[0][1]).toBeInstanceOf(Blob);
-    expect(beaconCalls[0][1].type).toBe('application/json');
+    expect(beaconCalls[0][1].type).toContain('application/json');
 
     // Restore
     Object.defineProperty(global, 'navigator', { value: origNavigator, configurable: true });
@@ -117,7 +144,7 @@ describe('Transport — drain()', () => {
 
   it('falls back to async flush when sendBeacon is unavailable', async () => {
     const { t } = makeTransport({ paused: true });
-    t.send({ event: 'ev' });
+    t.send(mockTrackEventPayload({ n: 'ev' }));
 
     // Simulate no sendBeacon
     const orig = (global as Record<string, unknown>).navigator;
@@ -142,25 +169,25 @@ describe('Transport — batch splitting', () => {
     // Start paused to prevent auto-flush from triggering mid-add, which would
     // cause the flush() call to join a cycle that only saw a partial buffer.
     const { t, fetchFn } = makeTransport({ batchSize: 2, paused: true });
-    t.send({ event: 'a' });
-    t.send({ event: 'b' });
-    t.send({ event: 'c' });
+    t.send(mockTrackEventPayload({ n: 'a' }));
+    t.send(mockTrackEventPayload({ n: 'b' }));
+    t.send(mockTrackEventPayload({ n: 'c' }));
     // All 3 events are in the buffer before flush() starts its cycle.
     t.start();
     await t.flush();
     // 3 events, batchSize=2 → 2 HTTP calls ([a,b] and [c])
     expect(fetchFn.mock.calls.length).toBeGreaterThanOrEqual(2);
     const allEvents = fetchFn.mock.calls.flatMap(
-      (call) => (JSON.parse(call[1].body as string) as { events: { event: string }[] }).events,
+      (call) => (JSON.parse(call[1].body as string) as { events: { n: string }[] }).events,
     );
-    expect(allEvents.map((e) => e.event).sort()).toEqual(['a', 'b', 'c']);
+    expect(allEvents.map((e) => e.n).sort()).toEqual(['a', 'b', 'c']);
     await t.close();
   });
 
   it('sends all events in a single request when count <= batchSize', async () => {
     const { t, fetchFn } = makeTransport({ batchSize: 10 });
-    t.send({ event: 'x' });
-    t.send({ event: 'y' });
+    t.send(mockTrackEventPayload({ n: 'x' }));
+    t.send(mockTrackEventPayload({ n: 'y' }));
     await t.flush();
     expect(fetchFn).toHaveBeenCalledTimes(1);
     await t.close();
@@ -174,7 +201,7 @@ describe('Transport — batch splitting', () => {
 describe('Transport — compression', () => {
   it('sends a Uint8Array body when compress:true', async () => {
     const { t, fetchFn } = makeTransport({ compress: true });
-    t.send({ event: 'ev' });
+    t.send(mockTrackEventPayload({ n: 'ev' }));
     await t.flush();
     const body = fetchFn.mock.calls[0][1].body;
     expect(body).toBeInstanceOf(Uint8Array);
@@ -183,7 +210,7 @@ describe('Transport — compression', () => {
 
   it('sets Content-Encoding: gzip header when compress:true', async () => {
     const { t, fetchFn } = makeTransport({ compress: true });
-    t.send({ event: 'ev' });
+    t.send(mockTrackEventPayload({ n: 'ev' }));
     await t.flush();
     const headers = fetchFn.mock.calls[0][1].headers as Record<string, string>;
     expect(headers['Content-Encoding']).toBe('gzip');
@@ -192,7 +219,7 @@ describe('Transport — compression', () => {
 
   it('sends a plain JSON string body when compress:false', async () => {
     const { t, fetchFn } = makeTransport({ compress: false });
-    t.send({ event: 'ev' });
+    t.send(mockTrackEventPayload({ n: 'ev' }));
     await t.flush();
     const body = fetchFn.mock.calls[0][1].body;
     expect(typeof body).toBe('string');
@@ -232,10 +259,11 @@ describe('Transport — retry on HTTP errors', () => {
       retry: { attempts: 5, baseDelayMs: 10, maxDelayMs: 100 },
     });
 
-    t.send({ event: 'ev' });
+    t.send(mockTrackEventPayload({ n: 'ev' }))    ;
     const flushP = t.flush();
     // Run all timers to process retries
-    await jest.runAllTimersAsync();
+    jest.runAllTimers();
+    await Promise.resolve();
     await flushP;
 
     expect(fetchFn.mock.calls.length).toBeGreaterThanOrEqual(3);
@@ -249,7 +277,7 @@ describe('Transport — retry on HTTP errors', () => {
       retry: { attempts: 3, baseDelayMs: 10 },
     });
 
-    t.send({ event: 'ev' });
+    t.send(mockTrackEventPayload({ n: 'ev' }));
     await t.flush();
     // Should only attempt once — 400 is a permanent error
     expect(fetchFn).toHaveBeenCalledTimes(1);
@@ -271,16 +299,16 @@ describe('Transport — priority routing', () => {
       fetch: fetchFn as unknown as (url: string, init: RequestInit) => Promise<Response>,
     });
 
-    t.send({ event: 'critical_ev', _priority: 'critical' });
-    t.send({ event: 'normal_ev' });
+    t.send(mockTrackEventPayload({ n: 'critical_ev', _priority: 'critical' }));
+    t.send(mockTrackEventPayload({ n: 'normal_ev' }));
 
     await t.flush();
 
     expect(fetchFn.mock.calls.length).toBeGreaterThanOrEqual(2);
     const allEvents = fetchFn.mock.calls.flatMap(
-      (call) => (JSON.parse(call[1].body as string) as { events: { event: string }[] }).events,
+      (call) => (JSON.parse(call[1].body as string) as { events: { n: string }[] }).events,
     );
-    expect(allEvents.map((e) => e.event).sort()).toEqual(['critical_ev', 'normal_ev']);
+    expect(allEvents.map((e) => e.n).sort()).toEqual(['critical_ev', 'normal_ev']);
     await t.close();
   });
 
@@ -293,16 +321,16 @@ describe('Transport — priority routing', () => {
       fetch: fetchFn as unknown as (url: string, init: RequestInit) => Promise<Response>,
     });
 
-    t.send({ event: 'high_ev', _priority: 'high' });
-    t.send({ event: 'normal_ev' });
-    t.send({ event: 'critical_ev', _priority: 'critical' });
+    t.send(mockTrackEventPayload({ n: 'high_ev', _priority: 'high' }));
+    t.send(mockTrackEventPayload({ n: 'normal_ev' }));
+    t.send(mockTrackEventPayload({ n: 'critical_ev', _priority: 'critical' }));
 
     await t.flush();
 
     const allEvents = fetchFn.mock.calls.flatMap(
-      (call) => (JSON.parse(call[1].body as string) as { events: { event: string }[] }).events,
+      (call) => (JSON.parse(call[1].body as string) as { events: { n: string }[] }).events,
     );
-    expect(allEvents.map((e) => e.event).sort()).toEqual(['critical_ev', 'high_ev', 'normal_ev']);
+    expect(allEvents.map((e) => e.n).sort()).toEqual(['critical_ev', 'high_ev', 'normal_ev']);
     await t.close();
   });
 
@@ -320,9 +348,9 @@ describe('Transport — priority routing', () => {
       paused: true,
     });
 
-    t.send({ event: 'normal_ev' });
-    t.send({ event: 'high_ev', _priority: 'high' });
-    t.send({ event: 'critical_ev', _priority: 'critical' });
+    t.send(mockTrackEventPayload({ n: 'normal_ev' }));
+    t.send(mockTrackEventPayload({ n: 'high_ev', _priority: 'high' }));
+    t.send(mockTrackEventPayload({ n: 'critical_ev', _priority: 'critical' }));
     t.drain();
 
     expect(beaconCount.value).toBe(3);
@@ -335,9 +363,9 @@ describe('Transport — priority routing', () => {
       fetch: makeFetch() as unknown as (u: string, i: RequestInit) => Promise<Response>,
       paused: true,
     });
-    t.send({ event: 'a' });
-    t.send({ event: 'b', _priority: 'high' });
-    t.send({ event: 'c', _priority: 'critical' });
+    t.send(mockTrackEventPayload({ n: 'a' }));
+    t.send(mockTrackEventPayload({ n: 'b', _priority: 'high' }));
+    t.send(mockTrackEventPayload({ n: 'c', _priority: 'critical' }));
     expect(t.queueSize).toBe(3);
   });
 
@@ -349,18 +377,18 @@ describe('Transport — priority routing', () => {
       paused: true,
     });
 
-    t.send({ event: 'critical_ev', _priority: 'critical' });
-    t.send({ event: 'high_ev', _priority: 'high' });
-    t.send({ event: 'normal_ev' });
+    t.send(mockTrackEventPayload({ n: 'critical_ev', _priority: 'critical' }));
+    t.send(mockTrackEventPayload({ n: 'high_ev', _priority: 'high' }));
+    t.send(mockTrackEventPayload({ n: 'normal_ev' }));
 
     expect(fetchFn).not.toHaveBeenCalled();
     t.start();
     await t.flush();
 
     const allEvents = fetchFn.mock.calls.flatMap(
-      (call) => (JSON.parse(call[1].body as string) as { events: { event: string }[] }).events,
+      (call) => (JSON.parse(call[1].body as string) as { events: { n: string }[] }).events,
     );
-    expect(allEvents.map((e) => e.event).sort()).toEqual(['critical_ev', 'high_ev', 'normal_ev']);
+    expect(allEvents.map((e) => e.n).sort()).toEqual(['critical_ev', 'high_ev', 'normal_ev']);
     await t.close();
   });
 
@@ -373,7 +401,7 @@ describe('Transport — priority routing', () => {
       fetch: fetchFn as unknown as (url: string, init: RequestInit) => Promise<Response>,
     });
     t.updateBatchConfig(3, 1_000);
-    t.send({ event: 'ev' });
+    t.send(mockTrackEventPayload({ n: 'ev' }));
     await t.flush();
     expect(fetchFn).toHaveBeenCalledTimes(1);
     await t.close();

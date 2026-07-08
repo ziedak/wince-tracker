@@ -7,13 +7,11 @@ import {
   SequenceCounter,
   SamplingFilter,
   uuidv7,
-  type TrackEvent,
   type PersonProps,
   type MinimalStore,
   type TrackOptions,
-  type EventPriority,
 } from '@wince/core';
-export type { TrackOptions, EventPriority } from '@wince/core';
+import type { TrackEventPayload } from '@wince/types';
 import { createStore, type IStore } from '@wince/storage';
 import type { ConsentProvider } from '@wince/consent';
 import { wireConsent } from './lib/consentWire';
@@ -116,7 +114,9 @@ export interface WinceConfig {
    * Custom enrichment / filter hook — runs after core enrichment.
    * Return the (possibly modified) event to keep it, or `null`/`undefined` to drop it.
    */
-  beforeTrack?: (event: TrackEvent) => TrackEvent | null | undefined;
+  beforeTrack?: (
+    event: TrackEventPayload,
+  ) => TrackEventPayload | null | undefined;
 
   /** Extra headers sent with every batch request. */
   headers?: Record<string, string>;
@@ -135,7 +135,10 @@ export interface WinceConfig {
    * `event` is the raw event payload if available (absent for pre-enqueue drops
    * such as consent or sampling rejections).
    */
-  onEventDropped?: (reason: DropReason, event?: Partial<TrackEvent>) => void;
+  onEventDropped?: (
+    reason: DropReason,
+    event?: Partial<TrackEventPayload>,
+  ) => void;
 
   /**
    * Cookieless consent mode. Default: `'off'` (standard persistent identity).
@@ -167,14 +170,14 @@ export interface WinceConfig {
 // ---------------------------------------------------------------------------
 
 export class WinceClient extends BaseClient {
-  private readonly _pipeline: Pipeline<TrackEvent>;
+  private readonly _pipeline: Pipeline<TrackEventPayload>;
   private readonly _session: SessionManager;
   private readonly _identity: IdentityManager;
   private readonly _seq: SequenceCounter;
   private readonly _sampler?: SamplingFilter;
   private readonly _store: IStore;
   private readonly _minStore: MinimalStore;
-  private _preEnrichQueue: TrackEvent[] = [];
+  private _preEnrichQueue: TrackEventPayload[] = [];
   private _lastErrorEid?: string;
   private _lastErrorTimer?: ReturnType<typeof setTimeout>;
   private _beforeDrainHooks: Array<() => void> = [];
@@ -256,7 +259,7 @@ export class WinceClient extends BaseClient {
     }
 
     // Custom enrichment / filter hook
-    this._pipeline = new Pipeline<TrackEvent>();
+    this._pipeline = new Pipeline<TrackEventPayload>();
     if (config.beforeTrack) {
       this._pipeline.use(config.beforeTrack);
     }
@@ -542,7 +545,7 @@ export class WinceClient extends BaseClient {
         : props;
 
     const eid = uuidv7();
-    const raw: TrackEvent = {
+    const raw: TrackEventPayload = {
       eid,
       seq: this._seq.next(),
       t: name,
@@ -558,9 +561,9 @@ export class WinceClient extends BaseClient {
         typeof document !== 'undefined'
           ? document.referrer || undefined
           : undefined,
-      window_id: this._windowId,
-      pageview_id,
-      prev_pageview_id,
+      wid: this._windowId,
+      pvid: pageview_id,
+      prev_pvid: prev_pageview_id,
       anon_prev: this._identity.getAndClearAnonPrev(),
     };
 
@@ -588,9 +591,9 @@ export class WinceClient extends BaseClient {
   }
 
   /** Apply one-shot enrichment props to a raw event, then clear them. */
-  private _applyEnrichmentOnce(raw: TrackEvent): TrackEvent {
+  private _applyEnrichmentOnce(raw: TrackEventPayload): TrackEventPayload {
     if (!this._enrichmentProps && !this._enrichmentPersonProps) return raw;
-    const result: TrackEvent = {
+    const result: TrackEventPayload = {
       ...raw,
       props: this._enrichmentProps
         ? { ...this._enrichmentProps, ...raw.props }
@@ -607,7 +610,7 @@ export class WinceClient extends BaseClient {
     return result;
   }
 
-  private _dispatchEvent(raw: TrackEvent): void {
+  private _dispatchEvent(raw: TrackEventPayload): void {
     const enriched = this._pipeline.run(raw);
     if (enriched) this._transport.send(enriched);
   }
