@@ -98,7 +98,7 @@ The canonical event schema is `TrackEventPayload` from [packages/core/src/lib/ty
 - `anon_prev` — previous anonymous ID after `reset()`.
 - `offset` — added by transport at encode time.
 - `schema_v` — added by transport at encode time.
-- `_priority` — internal transport hint; stripped before serialization. will be used by the consumer 
+- `_priority` — internal transport hint; stripped before serialization. will be used by the consumer 'critical' | 'high' | 'normal'
 - any additional forward-compatible fields.
 
 `offset` and `schema_v` are transport concerns, not client concerns.
