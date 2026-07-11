@@ -153,3 +153,21 @@ export const isInstanceOf = <T>(
 export function isEvent(candidate: unknown): candidate is Event {
   return typeof Event !== 'undefined' && isInstanceOf(candidate, Event);
 }
+
+export function validateEmail(email: string): boolean {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+}
+
+export function validatePassword(password: string): boolean {
+  // Password must be at least 8 characters long and contain at least one number and one letter
+  const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/;
+  return passwordRegex.test(password);
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Returns true when `v` is a lowercase, hyphenated UUID string. */
+export function isValidUuidv4(v: unknown): v is string {
+  return isString(v) && UUID_RE.test(v);
+}

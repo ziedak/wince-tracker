@@ -73,6 +73,11 @@
   "neverConnectToCloud": true,
   "analytics": false,
   "targetDefaults": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "cache": true
+    },
     "test": {
       "dependsOn": ["^build"]
     }
@@ -84,5 +89,8 @@
       "unitTestRunner": "none",
       "e2eTestRunner": "playwright"
     }
+  },
+  "cli": {
+    "packageManager": "bun"
   }
 }

@@ -1,5 +1,5 @@
-import { TrackEventPayload } from '@wince/types';
-import { HTTPClient } from './httpClient';
+import { compressAsync, TrackEventPayload } from '@wince/types';
+import { IHttpClient } from './IHttpClient';
 
 /**
  * Reasons an event or batch can be permanently dropped (or blocked from delivery).
@@ -18,7 +18,10 @@ export interface TransportOptions {
   url: string;
   batchSize?: number;
   batchTimeoutMs?: number;
-  compress?: boolean;
+  compress?: boolean | {
+    enabled: boolean;
+    compressFn: compressAsync;
+  };
   headers?: Record<string, string>;
   maxBufferSize?: number;
   /** Per-request network timeout (ms). Default: 10 000 */
@@ -31,7 +34,7 @@ export interface TransportOptions {
   paused?: boolean;
   /** Injectable fetch for testing */
   fetch?: (url: string, init: RequestInit) => Promise<Response>;
-  client?: HTTPClient;
+  client?: IHttpClient;
   retry?: {
     attempts?: number;
     baseDelayMs?: number;

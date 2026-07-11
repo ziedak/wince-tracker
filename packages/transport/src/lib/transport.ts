@@ -1,9 +1,12 @@
-import { compressSync } from '@wince/compress';
+// import { compressSync } from '@wince/types';
 import { Exporter } from './exporter';
 import { HttpSender } from './httpSender';
 import type { TransportOptions } from './types';
+import type { compressAsync } from '@wince/types';
 import { BeaconClient } from './beaconClient';
+import { HttpClient } from './HttpClient';
 import { TrackEventPayload } from '@wince/types';
+import { compressAsync as gzipCompressAsync } from '@wince/compress';
 
 const SCHEMA_VERSION = 1;
 
@@ -29,7 +32,12 @@ export class Transport {
 
   constructor(opts: TransportOptions) {
     this._url = opts.url;
-    this._useCompression = Boolean(opts.compress);
+    
+    // Normalize compress option to always be an object
+    const compressEnabled = opts.compress === undefined ? true : 
+                           typeof opts.compress === 'boolean' ? opts.compress : 
+                           opts.compress.enabled;
+    this._useCompression = compressEnabled;
 
     const headers: Record<string, string> = { ...opts.headers };
     if (this._useCompression) headers['Content-Encoding'] = 'gzip';
@@ -38,12 +46,17 @@ export class Transport {
       endpoint: opts.url,
       headers,
       requestTimeoutMs: opts.requestTimeoutMs,
-      fetch: opts.fetch,
+      fetch: opts.fetch
     });
+
+    const isCompressObject = (c: boolean | { enabled: boolean; compressFn: compressAsync } | undefined): c is { enabled: boolean; compressFn: compressAsync } => {
+      return typeof c === 'object' && c !== null;
+    };
 
     const encode = async (batch: TrackEventPayload[]) => {
       const payload = buildEnvelope(batch);
-      return this._useCompression ? compressSync(payload) : payload;
+      const compressObj = isCompressObject(opts.compress) ? opts.compress : { enabled: compressEnabled, compressFn: gzipCompressAsync };
+      return this._useCompression ? await compressObj.compressFn(payload) : payload;
     };
 
     const retryOpts = {
@@ -51,16 +64,14 @@ export class Transport {
       baseDelayMs: opts.retry?.baseDelayMs,
       maxDelayMs: opts.retry?.maxDelayMs,
       factor: opts.retry?.factor,
-      jitter: opts.retry?.jitter,
+      jitter: opts.retry?.jitter
     };
 
     const onDropped = opts.onDropped;
     const onBatchDelivered = opts.onBatchDelivered
       ? (items: TrackEventPayload[]) => {
           const eids = items
-            .map((e) =>
-              typeof e['eid'] === 'string' ? (e['eid'] as string) : null,
-            )
+            .map((e) => (typeof e['eid'] === 'string' ? (e['eid'] as string) : null))
             .filter((id): id is string => id !== null);
           if (eids.length > 0) opts.onBatchDelivered?.(eids);
         }
@@ -79,7 +90,7 @@ export class Transport {
       rateLimit: { bucketSize: 10, refillRate: 10, refillIntervalMs: 1_000 },
       retry: retryOpts,
       onDropped,
-      onBatchDelivered,
+      onBatchDelivered
     });
 
     // ── High lane: small batches, 2 s flush. ───────────────────────────────
@@ -92,7 +103,7 @@ export class Transport {
       maxBufferSize: 200,
       retry: retryOpts,
       onDropped,
-      onBatchDelivered,
+      onBatchDelivered
     });
 
     // ── Normal lane: configured batch size + interval. ─────────────────────
@@ -105,7 +116,7 @@ export class Transport {
       maxBufferSize: opts.maxBufferSize ?? 500,
       retry: retryOpts,
       onDropped,
-      onBatchDelivered,
+      onBatchDelivered
     });
 
     if (opts.paused) {
@@ -134,17 +145,11 @@ export class Transport {
   }
 
   get queueSize(): number {
-    return (
-      this._critical.queueSize + this._high.queueSize + this._normal.queueSize
-    );
+    return this._critical.queueSize + this._high.queueSize + this._normal.queueSize;
   }
 
   get circuitOpen(): boolean {
-    return (
-      this._critical.circuitOpen ||
-      this._high.circuitOpen ||
-      this._normal.circuitOpen
-    );
+    return this._critical.circuitOpen || this._high.circuitOpen || this._normal.circuitOpen;
   }
 
   /**
@@ -185,17 +190,14 @@ export class Transport {
   drain(): void {
     const hasBeacon =
       typeof navigator !== 'undefined' &&
-      typeof (navigator as Navigator & { sendBeacon?: unknown }).sendBeacon ===
-        'function';
+      typeof (navigator as Navigator & { sendBeacon?: unknown }).sendBeacon === 'function';
 
     if (!hasBeacon) {
-      void Promise.all([
-        this._critical.flush(),
-        this._high.flush(),
-        this._normal.flush(),
-      ]).catch(() => {
-        /* best-effort */
-      });
+      void Promise.all([this._critical.flush(), this._high.flush(), this._normal.flush()]).catch(
+        () => {
+          /* best-effort */
+        }
+      );
       return;
     }
 
@@ -203,16 +205,13 @@ export class Transport {
     const drainOpts = {
       encodeSync: (batch: TrackEventPayload[]) => buildEnvelope(batch),
       send: (data: string | Uint8Array) => {
-        const type =
-          typeof data === 'string'
-            ? 'application/json'
-            : 'application/octet-stream';
+        const type = typeof data === 'string' ? 'application/json' : 'application/octet-stream';
         (
           navigator as Navigator & {
             sendBeacon: (u: string, b: Blob) => boolean;
           }
         ).sendBeacon(url, new Blob([data as BlobPart], { type }));
-      },
+      }
     };
 
     // Priority order: critical → high → normal.
@@ -222,19 +221,11 @@ export class Transport {
   }
 
   async flush(): Promise<void> {
-    await Promise.all([
-      this._critical.flush(),
-      this._high.flush(),
-      this._normal.flush(),
-    ]);
+    await Promise.all([this._critical.flush(), this._high.flush(), this._normal.flush()]);
   }
 
   async close(): Promise<void> {
-    await Promise.all([
-      this._critical.close(),
-      this._high.close(),
-      this._normal.close(),
-    ]);
+    await Promise.all([this._critical.close(), this._high.close(), this._normal.close()]);
   }
 }
 
@@ -244,11 +235,8 @@ export default Transport;
  * Create a default Transport instance for browser usage.
  * Uses BeaconClient with a Fetch fallback and enables compression by default.
  */
-export function createDefaultTransport(
-  url: string,
-  opts?: Partial<TransportOptions>,
-) {
-  const client = new BeaconClient();
+export function createDefaultTransport(url: string, opts?: Partial<TransportOptions>) {
+  const client = new BeaconClient(new HttpClient());
   const transport = new Transport({
     url,
     compress: opts?.compress ?? true,
@@ -256,7 +244,7 @@ export function createDefaultTransport(
     batchSize: opts?.batchSize,
     batchTimeoutMs: opts?.batchTimeoutMs,
     headers: opts?.headers,
-    retry: opts?.retry,
+    retry: opts?.retry
   } as TransportOptions);
   return transport;
 }
@@ -273,6 +261,6 @@ export function createClientTransport(opts: TransportOptions): Transport {
     fetch: opts.fetch,
     paused: opts.paused ?? true,
     onDropped: opts.onDropped,
-    onBatchDelivered: opts.onBatchDelivered,
+    onBatchDelivered: opts.onBatchDelivered
   });
 }

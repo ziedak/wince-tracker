@@ -1,26 +1,21 @@
-import { deserialize } from '../utils';
+import { deserialize } from '@wince/utils';
+import type { IStorage, StoreKind } from '@wince/types';
 
-export interface IStore {
-  isAvailable(): boolean;
-  refreshKey(
-    key: string,
-    updater: (current: string | undefined | null) => string,
-  ): void;
-  get<T>(key: string): T | undefined;
-  set(key: string, value: unknown): void;
-  delete(key: string): void;
-  clear(prefix?: string): void;
-  /** Force all pending writes immediately (e.g. on pagehide). Optional. */
-  flush(): void;
-}
-export class BaseStorage implements IStore {
+export class BaseStorage implements IStorage {
   protected _data: Map<string, string> = new Map();
   private _flushTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     private storage?: Storage,
-    private readonly _debounceMs = 16,
+    private readonly _debounceMs = 16
   ) {}
+
+  getStrategy(): StoreKind {
+    if (!this.storage) return 'memory';
+    if (this.storage === localStorage) return 'localStorage';
+    if (this.storage === sessionStorage) return 'sessionStorage';
+    return 'memory';
+  }
 
   isAvailable(): boolean {
     if (!this.storage) return true; // MemoryStore fallback is always available
@@ -98,10 +93,7 @@ export class BaseStorage implements IStore {
    * lands in `localStorage` immediately — required for cross-tab safety
    * on fields like `lastActiveAt`.
    */
-  refreshKey(
-    key: string,
-    updater: (current: string | undefined | null) => string,
-  ): void {
+  refreshKey(key: string, updater: (current: string | undefined | null) => string): void {
     try {
       // Respect any in-flight write for this key before reading.
       const current = this._data.get(key) ?? this.storage?.getItem(key);
@@ -122,8 +114,7 @@ export class BaseStorage implements IStore {
     this._flushTimer = undefined;
     for (const [key, value] of this._data) {
       try {
-        if (this.storage && this.storage.getItem(key) !== value)
-          this.storage.setItem(key, value);
+        if (this.storage && this.storage.getItem(key) !== value) this.storage.setItem(key, value);
       } catch {
         /* quota */
       }

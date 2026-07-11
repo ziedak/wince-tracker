@@ -2,7 +2,7 @@ export * from './lib/safeSetTimeout';
 export * from './lib/sendOutcome';
 export * from './lib/types';
 export * from './lib/httpClient';
-export * from './lib/fetchClient';
+export * from './lib/HttpClient';
 export * from './lib/beaconClient';
 export * from './lib/retry';
 export * from './lib/batchQueue';

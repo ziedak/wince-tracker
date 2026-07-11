@@ -1,25 +1,28 @@
-import { StoreKind, createMultiStore } from './stores/MultiStorage';
-export type { IStore } from './stores/BaseStorage';
+import { StoreKind } from '@wince/types';
+import { CookieStoreOptions } from './stores/CookieStore';
+import { createMultiStorage } from './stores/MultiStorage';
 
-export * from './DurableQueue';
-export { createMultiStore } from './stores/MultiStorage';
-/** @alias createMultiStore — kept for backwards compatibility with @wince/web */
-export const createStore = createMultiStore;
+export { DurableQueue, type PersistedEvent } from './DurableQueue';
+export { createMultiStorage } from './stores/MultiStorage';
+
 export const STORAGE_STRATEGIES: StoreKind[] = [
   'localStorage',
   'sessionStorage',
   'cookie',
-  'memory',
+  'memory'
 ];
 export { BaseStorage } from './stores/BaseStorage';
-export  {type StoreKind} from './stores/MultiStorage';
 
-export const LocalStore = createMultiStore({ strategies: ['localStorage'] });
-export const SessionStore = createMultiStore({
-  strategies: ['sessionStorage'],
+export const LocalStore = createMultiStorage({ strategies: ['localStorage'] });
+export const SessionStore = createMultiStorage({
+  strategies: ['sessionStorage']
 });
-export const MemoryStore = createMultiStore({ strategies: ['memory'] });
-export const CookieStore = createMultiStore({
-  strategies: ['cookie'],
-  cookieOptions: { crossSubdomain: false },
-});
+export const MemoryStore = createMultiStorage({ strategies: ['memory'] });
+
+export { getRootDomain, resetRootDomainCache } from './stores/CookieStore';
+export type { CookieStoreOptions } from './stores/CookieStore';
+export const CookieStore = (cookieOptions?: CookieStoreOptions) =>
+  createMultiStorage({
+    strategies: ['cookie'],
+    cookieOptions: { crossSubdomain: false, ...cookieOptions }
+  });

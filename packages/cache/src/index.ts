@@ -1,1 +1,1 @@
-export * from './lib/cache';
+export { LRUCache, type LRUCacheOptions } from './cache';

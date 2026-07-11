@@ -157,7 +157,7 @@ export function setValueByPath(
     }
   }
 }
-function smartClone<T>(obj: T, seenObjects = new WeakMap()): T {
+export function smartClone<T>(obj: T, seenObjects = new WeakMap()): T {
   // Handle primitive types and functions
   if (obj === null || typeof obj !== 'object') {
     return obj;

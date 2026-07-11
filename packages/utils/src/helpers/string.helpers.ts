@@ -1,13 +1,4 @@
-export function validateEmail(email: string): boolean {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
-}
 
-export function validatePassword(password: string): boolean {
-  // Password must be at least 8 characters long and contain at least one number and one letter
-  const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/;
-  return passwordRegex.test(password);
-}
 
 export function capitalizeFirstLetter(str: string): string {
   if (str.length === 0) return str;

@@ -67,9 +67,11 @@ export class BatchQueue<T> {
 
     // Drop oldest if buffer is full
     if (this._buffer.length >= this._maxBufferSize) {
-      const dropped = this._buffer.shift()!;
-      this._bufferBytes -= this._sizeOf(dropped);
-      this._onDropped?.('buffer_full', dropped);
+      const dropped = this._buffer.shift();
+      if (dropped !== undefined) {
+        this._bufferBytes -= this._sizeOf(dropped);
+        this._onDropped?.('buffer_full', dropped);
+      }
     }
 
     this._buffer.push(item);

@@ -1,34 +1,34 @@
-// ===========================================================================
-// IStore — common interface for all storage strategies
-// ===========================================================================
-
-import { BaseStorage, IStore } from './BaseStorage';
+import { IStorage, StoreKind } from '@wince/types';
+import { BaseStorage } from './BaseStorage';
 import { CookieStoreOptions, CookieStore } from './CookieStore';
 
-export type StoreKind = 'localStorage' | 'sessionStorage' | 'cookie' | 'memory';
 export const STORAGE_STRATEGIES: StoreKind[] = [
   'localStorage',
   'sessionStorage',
   'cookie',
-  'memory',
+  'memory'
 ];
 export interface CreateStoreOptions {
   strategies?: StoreKind[];
-  cookieOptions?: CookieStoreOptions;
+  cookieOptions?: Partial<CookieStoreOptions>;
 }
-export class MultiStorage implements IStore {
-  private readonly stores: Map<StoreKind, IStore> = new Map();
+
+export class MultiStorage implements IStorage {
+  private readonly stores: Map<StoreKind, IStorage> = new Map();
   private readonly strategies: StoreKind[];
-  private readonly cookieOptions?: CookieStoreOptions;
+  private readonly cookieOptions?: Partial<CookieStoreOptions>;
 
   constructor(options: CreateStoreOptions) {
     this.strategies = options.strategies ?? STORAGE_STRATEGIES;
     this.cookieOptions = options.cookieOptions;
     this.initializeStores();
   }
+  getStrategy(): StoreKind[] {
+    return Array.from(this.stores.keys());
+  }
   private initializeStores() {
     for (const kind of this.strategies) {
-      let store: IStore;
+      let store: IStorage;
 
       switch (kind) {
         case 'localStorage':
@@ -67,10 +67,7 @@ export class MultiStorage implements IStore {
     return availability;
   }
 
-  refreshKey(
-    key: string,
-    updater: (current: string | undefined | null) => string,
-  ): void {
+  refreshKey(key: string, updater: (current: string | undefined | null) => string): void {
     this.stores.forEach((store) => {
       store.refreshKey(key, updater);
     });
@@ -115,10 +112,10 @@ export class MultiStorage implements IStore {
  * @param opts
  * @returns
  */
-export function createMultiStore(opts: CreateStoreOptions = {}): IStore {
+export function createMultiStorage(opts: CreateStoreOptions = {}): MultiStorage {
   const storageOptions = {
     strategies: opts.strategies ?? STORAGE_STRATEGIES,
-    cookieOptions: opts.cookieOptions ?? { crossSubdomain: false },
+    cookieOptions: opts.cookieOptions ?? { crossSubdomain: false }
   };
   return new MultiStorage(storageOptions);
 }

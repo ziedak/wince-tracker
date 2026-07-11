@@ -15,16 +15,16 @@ export interface HttpSenderOptions {
 type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
 
 export class HttpSender {
-  private readonly _endpoint:         string;
-  private readonly _headers:          Record<string, string>;
+  private readonly _endpoint: string;
+  private readonly _headers: Record<string, string>;
   private readonly _requestTimeoutMs: number;
-  private readonly _fetchFn:          FetchFn;
+  private readonly _fetchFn: FetchFn;
 
   constructor(opts: HttpSenderOptions) {
-    this._endpoint         = opts.endpoint;
-    this._headers          = { 'Content-Type': 'application/json', ...opts.headers };
+    this._endpoint = opts.endpoint;
+    this._headers = { 'Content-Type': 'application/json', ...opts.headers };
     this._requestTimeoutMs = opts.requestTimeoutMs ?? 10_000;
-    this._fetchFn          = opts.fetch ?? ((url, init) => globalThis.fetch(url, init));
+    this._fetchFn = opts.fetch ?? ((url, init) => globalThis.fetch(url, init));
   }
 
   /**
@@ -33,20 +33,20 @@ export class HttpSender {
    */
   async send(
     body: string | Uint8Array,
-    extraHeaders?: Record<string, string>,
+    extraHeaders?: Record<string, string>
   ): Promise<SendOutcome> {
-    const ctrl  = new AbortController();
+    const ctrl = new AbortController();
     const timer = safeSetTimeout(() => ctrl.abort(), this._requestTimeoutMs);
 
     let res: Response;
     try {
       const bodySize = typeof body === 'string' ? body.length : body.byteLength;
       res = await this._fetchFn(this._endpoint, {
-        method:    'POST',
-        headers:   { ...this._headers, ...extraHeaders } as Record<string, string>,
-        body:      body as BodyInit,
-        signal:    ctrl.signal,
-        keepalive: bodySize < 51 * 1024,
+        method: 'POST',
+        headers: { ...this._headers, ...extraHeaders } as Record<string, string>,
+        body: body as BodyInit,
+        signal: ctrl.signal,
+        keepalive: bodySize < 51 * 1024
       });
     } catch {
       clearTimeout(timer);
@@ -63,9 +63,8 @@ export class HttpSender {
       const ra = res.headers.get('Retry-After');
       if (ra !== null) {
         const secs = Number(ra);
-        const retryAfterMs = Number.isFinite(secs) && secs > 0
-          ? secs * 1000
-          : Date.parse(ra) - Date.now();
+        const retryAfterMs =
+          Number.isFinite(secs) && secs > 0 ? secs * 1000 : Date.parse(ra) - Date.now();
         if (retryAfterMs > 0) {
           return { kind: 'retry', retryAfterMs };
         }
@@ -73,7 +72,11 @@ export class HttpSender {
     }
 
     // Drain body to prevent keep-alive issues (e.g. Cloudflare Workers)
-    try { await res.body?.cancel(); } catch { /* best-effort */ }
+    try {
+      await res.body?.cancel();
+    } catch {
+      /* best-effort */
+    }
 
     return outcome;
   }

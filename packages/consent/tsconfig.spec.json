@@ -2,10 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./out-tsc/jest",
-    "lib": ["es2022", "dom"],
     "types": ["jest", "node"],
-    "module": "esnext",
-    "moduleResolution": "bundler",
     "forceConsistentCasingInFileNames": true
   },
   "include": [
@@ -13,14 +10,12 @@
     "jest.config.cts",
     "src/**/*.test.ts",
     "src/**/*.spec.ts",
-    "src/**/*.d.ts"
+    "src/**/*.d.ts",
+    "tests/**/*.spec.ts"
   ],
   "references": [
     {
       "path": "./tsconfig.lib.json"
-    },
-    {
-      "path": "../storage/tsconfig.lib.json"
     }
   ]
 }

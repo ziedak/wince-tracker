@@ -4,8 +4,7 @@ const fs = require('fs');
 const resolve = require('@rollup/plugin-node-resolve').nodeResolve;
 const commonjs = require('@rollup/plugin-commonjs');
 const _esbuildPkg = require('rollup-plugin-esbuild');
-const esbuild =
-  _esbuildPkg && _esbuildPkg.default ? _esbuildPkg.default : _esbuildPkg;
+const esbuild = _esbuildPkg && _esbuildPkg.default ? _esbuildPkg.default : _esbuildPkg;
 const _terserPkg = require('@rollup/plugin-terser');
 const terser = _terserPkg && _terserPkg.default ? _terserPkg.default : _terserPkg;
 
@@ -13,12 +12,10 @@ let visualizer;
 try {
   const _visualizerPkg = require('rollup-plugin-visualizer');
   visualizer =
-    _visualizerPkg && _visualizerPkg.visualizer
-      ? _visualizerPkg.visualizer
-      : _visualizerPkg;
+    _visualizerPkg && _visualizerPkg.visualizer ? _visualizerPkg.visualizer : _visualizerPkg;
 } catch (e) {
   console.warn(
-    `rollup-plugin-visualizer not found, bundle analysis will be unavailable. To enable, install it as a dev dependency. error: ${e.message}`,
+    `rollup-plugin-visualizer not found, bundle analysis will be unavailable. To enable, install it as a dev dependency. error: ${e.message}`
   );
   visualizer = null;
 }
@@ -34,9 +31,7 @@ const aliasPlugin = (() => {
       try {
         if (!fs.statSync(pkgDir).isDirectory()) continue;
       } catch (e) {
-        console.warn(
-          `Unable to access package directory ${pkgDir}: ${e.message}`,
-        );
+        console.warn(`Unable to access package directory ${pkgDir}: ${e.message}`);
         continue;
       }
       const srcIndex = path.join(pkgDir, 'src', 'index.ts');
@@ -55,7 +50,9 @@ const aliasPlugin = (() => {
               entries.push({ find: `@wince/${name}/${subName}`, replacement: srcFile });
             }
           }
-        } catch { /* ignore — package.json not readable */ }
+        } catch {
+          /* ignore — package.json not readable */
+        }
         entries.push({ find: `@wince/${name}`, replacement: srcIndex });
       }
     }
@@ -74,7 +71,7 @@ const basePluginsNoTerser = [
     extensions: ['.ts', '.tsx', '.mjs', '.js', '.json'],
     browser: true,
     preferBuiltins: false,
-    exportConditions: ['@wince/source', 'module', 'browser', 'import', 'default'],
+    exportConditions: ['@wince/source', 'module', 'browser', 'import', 'default']
   }),
   // Convert CJS deps to ESM before esbuild transpiles them
   commonjs(),
@@ -83,13 +80,13 @@ const basePluginsNoTerser = [
     include: /\.([jt]s|tsx?)$/,
     sourceMap: true,
     target: 'es2020',
-    tsconfig: path.resolve(__dirname, 'tsconfig.lib.json'),
-  }),
+    tsconfig: path.resolve(__dirname, 'tsconfig.lib.json')
+  })
 ];
 
 const terserDefault = terser({
   compress: { ecma: 2020, passes: 2 },
-  format: { ecma: 2020 },
+  format: { ecma: 2020 }
 });
 
 const terserLite = terser({
@@ -99,9 +96,9 @@ const terserLite = terser({
     properties: {
       // only mangle internal names starting with underscore
       regex: /^_/,
-      keep_quoted: true,
-    },
-  },
+      keep_quoted: true
+    }
+  }
 });
 
 const basePlugins = [...basePluginsNoTerser, terserDefault];
@@ -112,15 +109,15 @@ if (process.env.ANALYZE && visualizer) {
     visualizer({
       filename: 'dist/visualizer.html',
       title: 'Wince web bundle',
-      gzipSize: true,
-    }),
+      gzipSize: true
+    })
   );
   litePlugins.push(
     visualizer({
       filename: 'dist/visualizer-lite.html',
       title: 'Wince web bundle (lite)',
-      gzipSize: true,
-    }),
+      gzipSize: true
+    })
   );
 }
 
@@ -134,23 +131,23 @@ const baseConfig = {
       format: 'umd',
       name: 'Wince',
       sourcemap: true,
-      banner: BANNER,
+      banner: BANNER
     },
     // Also write the UMD bundle directly into the sandbox vendor folder
     {
-      file: path.resolve(
-        __dirname,
-        '..',
-        '..',
-        'sandbox',
-        'vendor',
-        'index.umd.js',
-      ),
+      file: path.resolve(__dirname, '..', '..', 'sandbox', 'vendor', 'index.umd.js'),
       format: 'umd',
       name: 'Wince',
       sourcemap: true,
-      banner: BANNER,
+      banner: BANNER
     },
+    {
+      file: path.resolve(__dirname, '..', '..', 'dist', 'packages', 'web', 'index.umd.js'),
+      format: 'umd',
+      name: 'Wince',
+      sourcemap: true,
+      banner: BANNER
+    }
   ],
   // Important: do not treat workspace libraries as external so Rollup
   // will inline `@wince/core` and its dependencies into the single bundle.
@@ -159,8 +156,8 @@ const baseConfig = {
   treeshake: {
     moduleSideEffects: false,
     propertyReadSideEffects: false,
-    unknownGlobalSideEffects: false,
-  },
+    unknownGlobalSideEffects: false
+  }
 };
 
 const liteConfig = {
@@ -173,31 +170,31 @@ const liteConfig = {
       format: 'umd',
       name: 'WinceLite',
       sourcemap: true,
-      banner: BANNER,
+      banner: BANNER
     },
     // Also write the lite UMD bundle into sandbox vendor for testing
     {
-      file: path.resolve(
-        __dirname,
-        '..',
-        '..',
-        'sandbox',
-        'vendor',
-        'index.lite.umd.js',
-      ),
+      file: path.resolve(__dirname, '..', '..', 'sandbox', 'vendor', 'index.lite.umd.js'),
       format: 'umd',
       name: 'WinceLite',
       sourcemap: true,
-      banner: BANNER,
+      banner: BANNER
     },
+    {
+      file: path.resolve(__dirname, '..', '..', 'dist', 'packages', 'web', 'index.lite.umd.js'),
+      format: 'umd',
+      name: 'WinceLite',
+      sourcemap: true,
+      banner: BANNER
+    }
   ],
   external: [],
   plugins: litePlugins,
   treeshake: {
     moduleSideEffects: false,
     propertyReadSideEffects: false,
-    unknownGlobalSideEffects: false,
-  },
+    unknownGlobalSideEffects: false
+  }
 };
 
 const workerConfig = {
@@ -208,16 +205,16 @@ const workerConfig = {
       format: 'iife',
       name: '_WinceWorker', // IIFE wrapper name (not exported)
       sourcemap: true,
-      banner: BANNER,
-    },
+      banner: BANNER
+    }
   ],
   external: [],
   plugins: [...basePluginsNoTerser, terserDefault],
   treeshake: {
     moduleSideEffects: false,
     propertyReadSideEffects: false,
-    unknownGlobalSideEffects: false,
-  },
+    unknownGlobalSideEffects: false
+  }
 };
 
 module.exports = [baseConfig, liteConfig, workerConfig];

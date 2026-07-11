@@ -12,7 +12,7 @@ import {
   type TrackOptions,
 } from '@wince/core';
 import type { EventPriority, TrackEventPayload } from '@wince/types';
-import { createStore, type IStore } from '@wince/storage';
+import { createStore, type IStorage } from '@wince/storage';
 import type { ConsentProvider } from '@wince/consent';
 import { wireConsent } from './lib/consentWire';
 import { buildBaseDiagnostics } from './lib/diagnostics';
@@ -24,10 +24,10 @@ import { mountClick } from './plugins/click';
 import { StoreKind } from '@wince/storage';
 
 // ---------------------------------------------------------------------------
-// Adapter: IStore (unknown-typed get) → MinimalStore (string | null get)
+// Adapter: IStorage (unknown-typed get) → MinimalStore (string | null get)
 // ---------------------------------------------------------------------------
 
-function toMinimalStore(store: IStore): MinimalStore {
+function toMinimalStore(store: IStorage): MinimalStore {
   const base: MinimalStore = {
     get: (k) => {
       const v = store.get(k);
@@ -175,7 +175,7 @@ export class WinceClient extends BaseClient {
   private readonly _identity: IdentityManager;
   private readonly _seq: SequenceCounter;
   private readonly _sampler?: SamplingFilter;
-  private readonly _store: IStore;
+  private readonly _store: IStorage;
   private readonly _minStore: MinimalStore;
   private _preEnrichQueue: TrackEventPayload[] = [];
   private _lastErrorEid?: string;

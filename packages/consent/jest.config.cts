@@ -1,4 +1,4 @@
- 
+
 const { readFileSync } = require('fs');
 const nxPreset = require('@nx/jest/preset').default;
 
@@ -9,12 +9,11 @@ const swcJestConfig = JSON.parse(
 
 // Disable .swcrc look-up by SWC core because we're passing in swcJestConfig ourselves
 swcJestConfig.swcrc = false;
-
 module.exports = {
   ...nxPreset,
   displayName: '@wince/consent',
-
-  testEnvironment: 'jsdom',
+  preset: '../../jest.preset.js',
+  testEnvironment: 'jest-environment-jsdom',
   transform: {
     '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig],
   },

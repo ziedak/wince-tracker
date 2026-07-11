@@ -33,7 +33,8 @@
     "build:analyze": "ANALYZE=true rollup -c"
   },
   "devDependencies": {
-    "rollup-plugin-visualizer": "^6.0.3"
+    "rollup-plugin-visualizer": "*",
+    "@nx/jest": "*"
   },
   "dependencies": {
     "@wince/core": "workspace:*",
@@ -42,7 +43,6 @@
     "@wince/cache": "workspace:*",
     "@wince/storage": "workspace:*",
     "@wince/types": "workspace:*",
-    "@nx/jest": "22.7.5",
-    "fflate": "0.8.3"
+    "fflate": "*"
   }
 }

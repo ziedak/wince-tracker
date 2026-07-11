@@ -18,5 +18,12 @@
     "type": "es6"
   },
   "sourceMaps": true,
-  "exclude": []
+  "exclude": [
+    "jest.config.[ct]s",
+    
+    
+    "./src/jest-setup.ts$",
+    "./**/jest-setup.ts$",
+    ".*.js$"
+  ]
 }

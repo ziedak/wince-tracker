@@ -4,19 +4,22 @@
   "files": [],
   "references": [
     {
-      "path": "./packages/core"
+      "path": "./apps/playground-e2e"
     },
     {
-      "path": "./packages/utils"
+      "path": "./apps/playground"
     },
     {
-      "path": "./packages/transport"
+      "path": "./packages/cache"
     },
     {
       "path": "./packages/compress"
     },
     {
-      "path": "./packages/web"
+      "path": "./packages/consent"
+    },
+    {
+      "path": "./packages/core"
     },
     {
       "path": "./packages/observability"
@@ -25,19 +28,16 @@
       "path": "./packages/storage"
     },
     {
-      "path": "./packages/consent"
-    },
-    {
-      "path": "./packages/cache"
-    },
-    {
-      "path": "./apps/playground-e2e"
-    },
-    {
-      "path": "./apps/playground"
+      "path": "./packages/transport"
     },
     {
       "path": "./packages/types"
+    },
+    {
+      "path": "./packages/utils"
+    },
+    {
+      "path": "./packages/web"
     }
   ]
 }

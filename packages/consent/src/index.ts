@@ -1,2 +1,2 @@
-export * from './lib/consent';
-export { default } from './lib/consent';
+export { ConsentManager, ConsentStatus } from './consent.js';
+export { default } from './consent.js';

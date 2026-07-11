@@ -1,2 +1,1 @@
-export * from './lib/compress';
-export { default } from './lib/compress';
+export { compressAsync, decompressAsync, gzipCompressSync, gzipDecompressSync } from './compress';

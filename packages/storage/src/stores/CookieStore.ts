@@ -2,8 +2,8 @@
 // CookieStore — for cross-subdomain identity (anonymous ID, consent flag)
 // ===========================================================================
 
-import { deserialize, serialize } from '../utils';
-import { IStore } from './BaseStorage';
+import { deserialize, serialize } from '@wince/utils';
+import { IStorage, StoreKind } from '@wince/types';
 // Module-level cache so root-domain discovery runs once per page load.
 let _cachedRootDomain: string | null = null;
 
@@ -15,7 +15,7 @@ let _cachedRootDomain: string | null = null;
  * Adapted from 's seekFirstNonPublicSubDomain.
  */
 export function getRootDomain(hostname: string): string {
-  if (_cachedRootDomain !== null) return _cachedRootDomain;
+  if (_cachedRootDomain !== null && _cachedRootDomain !== '') return _cachedRootDomain;
   if (!hostname || ['localhost', '127.0.0.1', '::1'].includes(hostname)) {
     _cachedRootDomain = '';
     return '';
@@ -29,7 +29,7 @@ export function getRootDomain(hostname: string): string {
   const probe = '__wince_dm__';
 
   let found = '';
-  let len = Math.min(parts.length, 8); // paranoia cap
+  let len = Math.min(parts.length - 1, 8); // paranoia cap, leave at least one part
 
   while (!found && len--) {
     const candidate = parts.slice(len).join('.');
@@ -53,32 +53,33 @@ export function resetRootDomainCache(): void {
 
 export interface CookieStoreOptions {
   /** Default: true — sets cookie on the registrable root domain (e.g. .mystore.com) */
-  crossSubdomain?: boolean;
+  crossSubdomain: boolean;
   /** Default: true when page served over HTTPS */
-  secure?: boolean;
+  secure: boolean;
   /** Default: 'Lax' */
-  sameSite?: 'Lax' | 'Strict' | 'None';
+  sameSite: 'Lax' | 'Strict' | 'None';
   /** Default: 365 */
-  maxAgeDays?: number;
+  maxAgeDays: number;
 }
 
-export class CookieStore implements IStore {
-  private readonly _opts: Required<CookieStoreOptions>;
+const DEFAULT_COOKIE_OPTIONS: CookieStoreOptions = {
+  crossSubdomain: true,
+  secure: typeof location !== 'undefined' && location.protocol === 'https:',
+  sameSite: 'Lax',
+  maxAgeDays: 365
+};
+export class CookieStore implements IStorage {
+  private readonly _opts: CookieStoreOptions;
 
-  constructor(opts: CookieStoreOptions = {}) {
-    this._opts = {
-      crossSubdomain: opts.crossSubdomain ?? true,
-      secure:
-        opts.secure ??
-        (typeof location !== 'undefined' && location.protocol === 'https:'),
-      sameSite: opts.sameSite ?? 'Lax',
-      maxAgeDays: opts.maxAgeDays ?? 365,
-    };
+  constructor(opts: Partial<CookieStoreOptions> = {}) {
+    this._opts = { ...DEFAULT_COOKIE_OPTIONS, ...opts };
   }
+  getStrategy(): StoreKind | StoreKind[] {
+    return 'cookie';
+  }
+
   isAvailable(): boolean {
-    return (
-      typeof document !== 'undefined' && typeof document.cookie === 'string'
-    );
+    return typeof document !== 'undefined' && typeof document.cookie === 'string';
   }
 
   get<T>(key: string): T | undefined {
@@ -129,10 +130,7 @@ export class CookieStore implements IStore {
   flush(): void {
     /* no-op, cookies are written immediately */
   }
-  refreshKey(
-    key: string,
-    updater: (current: string | undefined | null) => string,
-  ): void {
+  refreshKey(key: string, updater: (current: string | undefined | null) => string): void {
     const current = this.get<string>(key) ?? null;
     const updated = updater(current);
     this.set(key, updated);

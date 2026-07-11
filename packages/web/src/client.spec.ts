@@ -1,5 +1,5 @@
-import { WinceClient, type WinceConfig } from './client';
 import { TrackEventPayload } from '@wince/types';
+import { WinceClient, type WinceConfig } from './client';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -7,23 +7,23 @@ import { TrackEventPayload } from '@wince/types';
 
 function makeFetch(status = 200) {
   return jest.fn().mockResolvedValue({
-    ok:      status >= 200 && status < 300,
+    ok: status >= 200 && status < 300,
     status,
     headers: { get: () => null },
-    body:    null,
+    body: null
   } as unknown as Response);
 }
 
 /** Create a client with consent disabled and compression off (for readable request bodies). */
 function makeClient(overrides: Partial<WinceConfig> = {}) {
   return new WinceClient({
-    endpoint:       'https://ingest.test/events',
-    consent:        null,   // disable consent gating by default
-    compress:       false,  // keep bodies as JSON strings for easy inspection
-    batchSize:      50,
+    endpoint: 'https://ingest.test/events',
+    consent: null, // disable consent gating by default
+    compress: false, // keep bodies as JSON strings for easy inspection
+    batchSize: 50,
     batchTimeoutMs: 100,
-    fetch:          makeFetch(),
-    ...overrides,
+    fetch: makeFetch(),
+    ...overrides
   });
 }
 
@@ -31,7 +31,9 @@ function makeClient(overrides: Partial<WinceConfig> = {}) {
 async function getFirstBatch(client: WinceClient, fetchFn: jest.Mock) {
   await client.flush();
   expect(fetchFn).toHaveBeenCalled();
-  const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as { events: TrackEventPayload[] };
+  const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as {
+    events: TrackEventPayload[];
+  };
   return envelope.events;
 }
 
@@ -42,7 +44,7 @@ async function getFirstBatch(client: WinceClient, fetchFn: jest.Mock) {
 describe('WinceClient — page()', () => {
   it('emits a $page_view event', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn });
+    const client = makeClient({ fetch: fetchFn });
     client.page();
     const [ev] = await getFirstBatch(client, fetchFn);
     expect(ev.n).toBe('$page_view');
@@ -51,7 +53,7 @@ describe('WinceClient — page()', () => {
 
   it('merges caller props into the page view event', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn });
+    const client = makeClient({ fetch: fetchFn });
     client.page({ section: 'checkout' });
     const [ev] = await getFirstBatch(client, fetchFn);
     expect(ev.n).toBe('$page_view');
@@ -61,7 +63,7 @@ describe('WinceClient — page()', () => {
 
   it('increments seq like any other event', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn });
+    const client = makeClient({ fetch: fetchFn });
     client.track('first');
     client.page();
     const batch = await getFirstBatch(client, fetchFn);
@@ -77,7 +79,7 @@ describe('WinceClient — page()', () => {
 describe('WinceClient — track()', () => {
   it('queues an event that is sent on flush()', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn });
+    const client = makeClient({ fetch: fetchFn });
     client.track('page_view');
     const batch = await getFirstBatch(client, fetchFn);
     expect(batch).toHaveLength(1);
@@ -87,7 +89,7 @@ describe('WinceClient — track()', () => {
 
   it('enriches events with required fields', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn });
+    const client = makeClient({ fetch: fetchFn });
     client.track('click', { target: 'btn' });
     const [ev] = await getFirstBatch(client, fetchFn);
 
@@ -102,7 +104,7 @@ describe('WinceClient — track()', () => {
 
   it('increments seq on each event', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn });
+    const client = makeClient({ fetch: fetchFn });
     client.track('a');
     client.track('b');
     client.track('c');
@@ -113,7 +115,7 @@ describe('WinceClient — track()', () => {
 
   it('same session ID across consecutive events', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn });
+    const client = makeClient({ fetch: fetchFn });
     client.track('a');
     client.track('b');
     const batch = await getFirstBatch(client, fetchFn);
@@ -123,9 +125,9 @@ describe('WinceClient — track()', () => {
 
   it('beforeTrack can drop an event', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({
-      fetch:       fetchFn,
-      beforeTrack: (e: TrackEventPayload) => (e.n === 'drop_me' ? null : e),
+    const client = makeClient({
+      fetch: fetchFn,
+      beforeTrack: (e: TrackEventPayload) => (e.n === 'drop_me' ? null : e)
     });
     client.track('keep');
     client.track('drop_me');
@@ -137,9 +139,9 @@ describe('WinceClient — track()', () => {
 
   it('beforeTrack can enrich the event', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({
-      fetch:       fetchFn,
-      beforeTrack: (e: TrackEventPayload) => ({ ...e, props: { ...e.props, extra: 42 } }),
+    const client = makeClient({
+      fetch: fetchFn,
+      beforeTrack: (e: TrackEventPayload) => ({ ...e, props: { ...e.props, extra: 42 } })
     });
     client.track('ev', { original: true });
     const [ev] = await getFirstBatch(client, fetchFn);
@@ -155,7 +157,7 @@ describe('WinceClient — track()', () => {
 describe('WinceClient — identify() / reset()', () => {
   it('identify() adds uid to subsequent events', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn });
+    const client = makeClient({ fetch: fetchFn });
     client.identify('user-001');
     client.track('ev');
     const [ev] = await getFirstBatch(client, fetchFn);
@@ -165,7 +167,7 @@ describe('WinceClient — identify() / reset()', () => {
 
   it('reset() changes the anonymous ID', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn });
+    const client = makeClient({ fetch: fetchFn });
     client.track('before');
     const [before] = await getFirstBatch(client, fetchFn);
     const anonBefore = before.anon;
@@ -181,7 +183,7 @@ describe('WinceClient — identify() / reset()', () => {
 
   it('reset() clears userId', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn });
+    const client = makeClient({ fetch: fetchFn });
     client.identify('u1');
     client.reset();
     client.track('ev');
@@ -192,8 +194,9 @@ describe('WinceClient — identify() / reset()', () => {
 
   it('reset() resets seq back to 0', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn });
-    client.track('a'); client.track('b');
+    const client = makeClient({ fetch: fetchFn });
+    client.track('a');
+    client.track('b');
     await client.flush();
     fetchFn.mockClear();
 
@@ -214,11 +217,11 @@ describe('WinceClient — consent gating', () => {
     const fetchFn = makeFetch();
     const noopUnsubscribe = () => undefined;
     const mockConsent = {
-      getStatus:  () => -1 as const,
-      isGranted:  () => false,
-      isDenied:   () => false,
-      isPending:  () => true,
-      onChange:   () => noopUnsubscribe,
+      getStatus: () => -1 as const,
+      isGranted: () => false,
+      isDenied: () => false,
+      isPending: () => true,
+      onChange: () => noopUnsubscribe
     };
     const client = makeClient({ fetch: fetchFn, consent: mockConsent });
     client.track('ev');
@@ -233,11 +236,14 @@ describe('WinceClient — consent gating', () => {
     let consentCb: ((s: -1 | 0 | 1) => void) | undefined;
     const noopUnsubscribe = () => undefined;
     const mockConsent = {
-      getStatus:  () => consentStatus as -1 | 0 | 1,
-      isGranted:  () => consentStatus === 1,
-      isDenied:   () => consentStatus === 0,
-      isPending:  () => consentStatus === -1,
-      onChange:   (cb: (s: -1 | 0 | 1) => void) => { consentCb = cb; return noopUnsubscribe; },
+      getStatus: () => consentStatus as -1 | 0 | 1,
+      isGranted: () => consentStatus === 1,
+      isDenied: () => consentStatus === 0,
+      isPending: () => consentStatus === -1,
+      onChange: (cb: (s: -1 | 0 | 1) => void) => {
+        consentCb = cb;
+        return noopUnsubscribe;
+      }
     };
     const client = makeClient({ fetch: fetchFn, consent: mockConsent });
 
@@ -263,7 +269,7 @@ describe('WinceClient — consent gating', () => {
 describe('WinceClient — sampling', () => {
   it('sampleRate=0 drops all events', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn, sampleRate: 0 });
+    const client = makeClient({ fetch: fetchFn, sampleRate: 0 });
     client.track('ev1');
     client.track('ev2');
     await client.flush();
@@ -273,7 +279,7 @@ describe('WinceClient — sampling', () => {
 
   it('sampleRate=1 keeps all events', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn, sampleRate: 1 });
+    const client = makeClient({ fetch: fetchFn, sampleRate: 1 });
     client.track('ev');
     const batch = await getFirstBatch(client, fetchFn);
     expect(batch).toHaveLength(1);
@@ -290,12 +296,15 @@ describe('WinceClient — browser lifecycle', () => {
     const beaconCalls: string[] = [];
     // Inject sendBeacon into jsdom's navigator
     Object.defineProperty(navigator, 'sendBeacon', {
-      value:        (url: string) => { beaconCalls.push(url); return true; },
-      configurable: true,
+      value: (url: string) => {
+        beaconCalls.push(url);
+        return true;
+      },
+      configurable: true
     });
 
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn });
+    const client = makeClient({ fetch: fetchFn });
     client.track('ev');
 
     window.dispatchEvent(new Event('pagehide'));
@@ -309,7 +318,7 @@ describe('WinceClient — browser lifecycle', () => {
 
   it('offline event pauses transport, online resumes it', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn });
+    const client = makeClient({ fetch: fetchFn });
 
     window.dispatchEvent(new Event('offline'));
     client.track('buffered');
@@ -325,7 +334,7 @@ describe('WinceClient — browser lifecycle', () => {
 
   it('close() removes lifecycle listeners', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn });
+    const client = makeClient({ fetch: fetchFn });
     await client.close();
 
     // After close, pagehide should not trigger drain (no error either)
@@ -340,7 +349,7 @@ describe('WinceClient — browser lifecycle', () => {
 describe('WinceClient — compression', () => {
   it('compress:true sends a Uint8Array body instead of a plain JSON string', async () => {
     const fetchFn = makeFetch();
-    const client  = makeClient({ fetch: fetchFn, compress: true });
+    const client = makeClient({ fetch: fetchFn, compress: true });
 
     client.track('ev');
     await client.flush();
