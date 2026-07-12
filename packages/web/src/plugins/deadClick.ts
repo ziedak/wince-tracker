@@ -1,3 +1,4 @@
+import { EventPriority } from '../../../types/src/types/Event';
 import type { WinceClient } from '../client';
 import { useBroadCapture } from './_click-utils';
 import { DeadClickType, pluginSource } from './types';
@@ -52,7 +53,7 @@ export function mountDeadClick(
           $plugin_source: pluginSource.DeadClick,
         },
         undefined,
-        { priority: 'critical' },
+        EventPriority.Critical,
       );
     }
     pending.length = 0;

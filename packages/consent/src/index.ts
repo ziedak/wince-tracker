@@ -1,2 +1,2 @@
-export { ConsentManager, ConsentStatus } from './consent.js';
-export { default } from './consent.js';
+export {Consent, ConsentStatus } from './consent';
+export type{ IConsent,ConsentOptions } from './consent';

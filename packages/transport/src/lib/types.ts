@@ -1,9 +1,9 @@
-import { DEFAULT_RETRY_OPTIONS, type DropReason } from './retry';
+import { DEFAULT_RETRY_OPTIONS } from './retry';
 import { compressAsync } from '@wince/compress';
 import { ExporterOptions } from './exporter';
 import { DEFAULT_BATCH_QUEUE_OPTS } from './batchQueue';
 import { DEFAULT_TOKEN_BUCKET_OPTIONS } from './rateLimiter';
-import { TrackEventPayload } from '@wince/types';
+import { DropReason, TrackEventPayload } from '@wince/types';
 
 export interface TransportOptions<T extends TrackEventPayload> {
   url: string;
@@ -42,8 +42,8 @@ export interface TransportOptions<T extends TrackEventPayload> {
 const SCHEMA_VERSION = 1;
 
 export const DEFAULT_TRANSPORT_OPTIONS: TransportOptions<TrackEventPayload> = {
-  url: '',
-  wsUrl: '',
+  url: 'https://test.wince.dev/track',
+  wsUrl: 'wss://test.wince.dev/ws',
 
   headers: {},
   maxBufferSize: 500,

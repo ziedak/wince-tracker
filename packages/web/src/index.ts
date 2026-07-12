@@ -3,8 +3,6 @@
 export * from '@wince/core';
 export { WinceClient, init } from './client';
 export type { WinceConfig, WinceDiagnostics } from './client';
-export type { DropReason } from '@wince/transport';
-export { createDefaultTransport } from '@wince/transport';
 
 // Tree-shakeable auto-capture plugins (not included in index.lite.ts)
 export { mountPageView } from './plugins/pageView';

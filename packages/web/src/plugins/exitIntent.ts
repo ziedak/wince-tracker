@@ -1,3 +1,4 @@
+import { EventPriority } from '@wince/types';
 import type { WinceClient } from '../client';
 import { ExitIntentType, pluginSource } from './types';
 
@@ -31,7 +32,7 @@ export function mountExitIntent(tracker: WinceClient): () => void {
         $plugin_source: pluginSource.ExitIntent,
       },
       undefined,
-      { priority: 'critical' },
+       EventPriority.Critical,
     );
   };
 

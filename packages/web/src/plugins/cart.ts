@@ -1,12 +1,6 @@
-import { TrackOptions } from '@wince/core';
 import type { WinceClient } from '../client';
-import {
-  CartActionType,
-  CartCheckoutAbandonType,
-  CartEventDetail,
-  pluginSource,
-} from './types';
-
+import { CartActionType, CartCheckoutAbandonType, CartEventDetail, pluginSource } from './types';
+import { EventPriority } from '@wince/types';
 /**
  * Expected shape of the `wince:cart` CustomEvent detail.
  * Dispatch this from your cart UI to automatically capture cart events.
@@ -33,29 +27,20 @@ const HIGH_PRIORITY_ACTIONS = new Set<string>([
   'checkout_complete',
   'checkout_abandon',
   'coupon_applied',
-  'coupon_failed',
+  'coupon_failed'
 ]);
 
 // Actions that mark the start/continuation of checkout — arm the abandon timer.
-const CHECKOUT_IN_PROGRESS_ACTIONS = new Set<string>([
-  'checkout_start',
-  'checkout_step',
-]);
+const CHECKOUT_IN_PROGRESS_ACTIONS = new Set<string>(['checkout_start', 'checkout_step']);
 
 // Actions that resolve checkout (success or explicit abandon) — disarm the timer.
 const CHECKOUT_RESOLVED_ACTIONS = new Set<string>([
   'purchase',
   'checkout_complete',
-  'checkout_abandon',
+  'checkout_abandon'
 ]);
 
-const ACTIVITY_EVENTS = [
-  'mousemove',
-  'keydown',
-  'scroll',
-  'click',
-  'touchstart',
-] as const;
+const ACTIVITY_EVENTS = ['mousemove', 'keydown', 'scroll', 'click', 'touchstart'] as const;
 
 export interface CartOptions {
   /**
@@ -109,13 +94,10 @@ const KNOWN_ACTIONS = new Set<string>([
   'purchase',
   'option_selected',
   'coupon_applied',
-  'coupon_failed',
+  'coupon_failed'
 ]);
 
-export function mountCart(
-  tracker: WinceClient,
-  options?: CartOptions,
-): () => void {
+export function mountCart(tracker: WinceClient, options?: CartOptions): () => void {
   if (typeof document === 'undefined') return () => undefined;
 
   // ── Abandon detection state ───────────────────────────────────────────────
@@ -151,10 +133,7 @@ export function mountCart(
     scheduleIdleTimer();
   }
 
-  function armAbandon(
-    stepName: string | undefined,
-    cartValue: number | undefined,
-  ): void {
+  function armAbandon(stepName: string | undefined, cartValue: number | undefined): void {
     _inCheckout = true;
     _abandoned = false;
     _lastStep = stepName;
@@ -199,10 +178,10 @@ export function mountCart(
         cart_value_total: _cartValueTotal,
         time_spent_seconds: timeSpent,
         trigger,
-        $plugin_source: pluginSource.Cart,
+        $plugin_source: pluginSource.Cart
       },
       undefined,
-      { priority: 'critical' },
+      EventPriority.Critical
     );
   }
 
@@ -223,7 +202,7 @@ export function mountCart(
     for (const evt of ACTIVITY_EVENTS) {
       window.addEventListener(evt, onActivity, {
         passive: true,
-        capture: true,
+        capture: true
       });
     }
   }
@@ -235,37 +214,30 @@ export function mountCart(
     const { action, ...rest } = detail;
     if (!KNOWN_ACTIONS.has(action)) return;
 
-    const trackOpts: TrackOptions | undefined = HIGH_PRIORITY_ACTIONS.has(
-      action,
-    )
-      ? { priority: 'high' }
-      : undefined;
+    const eventPriority: EventPriority = HIGH_PRIORITY_ACTIONS.has(action)
+      ? EventPriority.High
+      : EventPriority.Normal;
 
     const stepProps: Record<string, unknown> = {};
     if (action === 'checkout_step' && _stepStartAt > 0) {
-      stepProps['time_on_step_ms'] = Date.now() - _stepStartAt;
+      stepProps.time_on_step_ms = Date.now() - _stepStartAt;
     }
     tracker.track<CartActionType>(
       `$cart_${action}`,
       { ...rest, ...stepProps, $plugin_source: pluginSource.Cart },
       undefined,
-      trackOpts,
+      eventPriority
     );
-    if (action === 'checkout_start' || action === 'checkout_step')
-      _stepStartAt = Date.now();
+    if (action === 'checkout_start' || action === 'checkout_step') _stepStartAt = Date.now();
 
     if (autoAbandon) {
       if (CHECKOUT_IN_PROGRESS_ACTIONS.has(action)) {
-        const cartValue =
-          typeof rest['cart_value_total'] === 'number'
-            ? (rest['cart_value_total'] as number)
+        const cartValue = rest.cart_value_total ? rest.cart_value_total : undefined;
+        const stepName = rest.step_name
+          ? (rest.step_name as string)
+          : action === 'checkout_start'
+            ? 'start'
             : undefined;
-        const stepName =
-          typeof rest['step_name'] === 'string'
-            ? (rest['step_name'] as string)
-            : action === 'checkout_start'
-              ? 'start'
-              : undefined;
         armAbandon(stepName, cartValue);
       } else if (CHECKOUT_RESOLVED_ACTIONS.has(action)) {
         disarmAbandon();

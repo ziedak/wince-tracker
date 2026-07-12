@@ -15,7 +15,6 @@ import {
   IdentityManager,
   SequenceCounter,
   SamplingFilter,
-  uuidv7,
   type PersonProps,
 } from '@wince/core';
 import { DurableQueue } from '@wince/storage';
@@ -25,7 +24,8 @@ import type {
   WorkerToMainMsg,
   WorkerConfig,
 } from './messages';
-import { TrackEventPayload } from '@wince/types';
+import { EventPriority, TrackEventPayload } from '@wince/types';
+import { uuidv7 } from '@wince/utils';
 // ---------------------------------------------------------------------------
 // Worker state (initialised by the 'init' message)
 // ---------------------------------------------------------------------------
@@ -113,6 +113,7 @@ function enrichEvent(
     pvid: pageview_id,
     prev_pvid: prev_pageview_id,
     anon_prev: identity.getAndClearAnonPrev(),
+    priority: name === '$error' ? EventPriority.High : EventPriority.Normal,
   };
 
   // Record error EID so subsequent events can be tagged with $near_error.

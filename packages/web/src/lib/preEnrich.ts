@@ -5,22 +5,18 @@ export function applyEnrichmentOnceToEvents(
   enrichmentPersonProps?: {
     $set?: Record<string, unknown>;
     $set_once?: Record<string, unknown>;
-  },
+  }
 ): { events: TrackEventPayload[]; applied: boolean } {
   const out: TrackEventPayload[] = [];
   let applied = false;
   for (const ev of events) {
-    if (
-      !applied &&
-      ev.n !== '$identify' &&
-      (enrichmentProps || enrichmentPersonProps)
-    ) {
+    if (!applied && ev.n !== '$identify' && (enrichmentProps || enrichmentPersonProps)) {
       const newEv = {
         ...ev,
         props: enrichmentProps
           ? {
               ...(enrichmentProps as Record<string, unknown>),
-              ...(ev.props ?? {}),
+              ...(ev.props ?? {})
             }
           : ev.props,
         $set: enrichmentPersonProps
@@ -29,9 +25,9 @@ export function applyEnrichmentOnceToEvents(
         $set_once: enrichmentPersonProps
           ? {
               ...(enrichmentPersonProps.$set_once ?? {}),
-              ...(ev.$set_once ?? {}),
+              ...(ev.$set_once ?? {})
             }
-          : ev.$set_once,
+          : ev.$set_once
       };
       out.push(newEv);
       applied = true;

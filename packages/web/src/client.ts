@@ -1,4 +1,4 @@
-import type { DropReason } from '@wince/transport';
+import type { TransportOptions } from '@wince/transport';
 import { createClientTransport } from '@wince/transport';
 import {
   Pipeline,
@@ -6,46 +6,42 @@ import {
   IdentityManager,
   SequenceCounter,
   SamplingFilter,
-  uuidv7,
-  type PersonProps,
-  type MinimalStore,
-  type TrackOptions,
+  type PersonProps
 } from '@wince/core';
-import type { EventPriority, TrackEventPayload } from '@wince/types';
-import { createStore, type IStorage } from '@wince/storage';
-import type { ConsentProvider } from '@wince/consent';
+import { EventPriority, TrackEventPayload, StoreKind, IStorage, DropReason } from '@wince/types';
+import type { ConsentOptions, IConsent } from '@wince/consent';
 import { wireConsent } from './lib/consentWire';
 import { buildBaseDiagnostics } from './lib/diagnostics';
 import { fetchEnrichment } from './lib/enrichment';
 import { applyEnrichmentOnceToEvents } from './lib/preEnrich';
-import { BaseClient } from './lib/baseClient';
+import { BaseClient, BaseClientConfig } from './lib/baseClient';
 import { mountPageView } from './plugins/pageView';
 import { mountClick } from './plugins/click';
-import { StoreKind } from '@wince/storage';
+import { createMultiStorage } from '@wince/storage';
+import { uuidv7 } from '@wince/utils';
 
 // ---------------------------------------------------------------------------
-// Adapter: IStorage (unknown-typed get) → MinimalStore (string | null get)
+// Adapter: IStorage (unknown-typed get) → IStorage (string | null get)
 // ---------------------------------------------------------------------------
 
-function toMinimalStore(store: IStorage): MinimalStore {
-  const base: MinimalStore = {
-    get: (k) => {
-      const v = store.get(k);
-      return typeof v === 'string' ? v : null;
-    },
-    set: (k, v) => store.set(k, v),
-    delete: (k) => store.delete(k),
-  };
-  // Wire refreshKey if the underlying store supports it (LocalStore).
-  if (typeof (store as { refreshKey?: unknown }).refreshKey === 'function') {
-    type WithRefresh = {
-      refreshKey(k: string, u: (c: string | null) => string): void;
-    };
-    base.refreshKey = (k, updater) =>
-      (store as unknown as WithRefresh).refreshKey(k, updater);
-  }
-  return base;
-}
+// function toIStorage(store: IStorage): IStorage {
+//   const base: IStorage = {
+//     get: (k) => {
+//       const v = store.get(k);
+//       return typeof v === 'string' ? v : null;
+//     },
+//     set: (k, v) => store.set(k, v),
+//     delete: (k) => store.delete(k)
+//   };
+//   // Wire refreshKey if the underlying store supports it (LocalStore).
+//   if (typeof (store as { refreshKey?: unknown }).refreshKey === 'function') {
+//     type WithRefresh = {
+//       refreshKey(k: string, u: (c: string | null) => string): void;
+//     };
+//     base.refreshKey = (k, updater) => (store as unknown as WithRefresh).refreshKey(k, updater);
+//   }
+//   return base;
+// }
 
 // ---------------------------------------------------------------------------
 // WinceDiagnostics — runtime observability snapshot
@@ -76,7 +72,7 @@ export interface WinceDiagnostics {
 // WinceConfig
 // ---------------------------------------------------------------------------
 
-export interface WinceConfig {
+export interface WinceConfig extends BaseClientConfig {
   /** Ingest API endpoint URL. */
   endpoint: string;
 
@@ -108,15 +104,13 @@ export interface WinceConfig {
    * Consent provider. Defaults to the singleton from `@wince/consent`.
    * Pass `null` to disable consent gating entirely (e.g. for GDPR-exempt use-cases).
    */
-  consent?: ConsentProvider | null;
+  // consent: IConsent;
 
   /**
    * Custom enrichment / filter hook — runs after core enrichment.
    * Return the (possibly modified) event to keep it, or `null`/`undefined` to drop it.
    */
-  beforeTrack?: (
-    event: TrackEventPayload,
-  ) => TrackEventPayload | null | undefined;
+  beforeTrack?: (event: TrackEventPayload) => TrackEventPayload | null | undefined;
 
   /** Extra headers sent with every batch request. */
   headers?: Record<string, string>;
@@ -135,10 +129,7 @@ export interface WinceConfig {
    * `event` is the raw event payload if available (absent for pre-enqueue drops
    * such as consent or sampling rejections).
    */
-  onEventDropped?: (
-    reason: DropReason,
-    event?: Partial<TrackEventPayload>,
-  ) => void;
+  onEventDropped?: (reason: DropReason, event?: Partial<TrackEventPayload>) => void;
 
   /**
    * Cookieless consent mode. Default: `'off'` (standard persistent identity).
@@ -176,46 +167,33 @@ export class WinceClient extends BaseClient {
   private readonly _seq: SequenceCounter;
   private readonly _sampler?: SamplingFilter;
   private readonly _store: IStorage;
-  private readonly _minStore: MinimalStore;
   private _preEnrichQueue: TrackEventPayload[] = [];
   private _lastErrorEid?: string;
   private _lastErrorTimer?: ReturnType<typeof setTimeout>;
   private _beforeDrainHooks: Array<() => void> = [];
 
-  constructor(config: WinceConfig) {
-    super({
-      consent: config.consent,
-      fetch: config.fetch,
-      onEventDropped: config.onEventDropped,
-      enrichmentReady: !config.enrichmentUrl,
-    });
+  constructor(config: WinceConfig, _consent?: IConsent) {
+    super(config, _consent);
 
-    const store = createStore({
-      strategies: config.storagePreference ?? [
-        'localStorage',
-        'sessionStorage',
-        'cookie',
-        'memory',
-      ],
+    this._store = createMultiStorage({
+      strategies: config.storagePreference ?? ['localStorage', 'sessionStorage', 'cookie', 'memory']
     });
-    const minStore = toMinimalStore(store);
-    this._store = store;
-    this._minStore = minStore;
 
     // Resolve consent provider first — needed to compute initial store policy.
     const initialGranted = this._consent === null || this._consent.isGranted();
     const usePersistentStore =
-      config.cookieless !== 'always' &&
-      (config.cookieless !== 'on_reject' || initialGranted);
+      config.cookieless !== 'always' && (config.cookieless !== 'on_reject' || initialGranted);
 
     this._session = new SessionManager({
       idleTimeoutMs: config.sessionIdleTimeoutMs,
       maxDurationMs: config.sessionMaxDurationMs,
-      store: usePersistentStore ? minStore : undefined,
+      store: usePersistentStore ? this._store : undefined
     });
+
     this._identity = new IdentityManager({
-      store: usePersistentStore ? minStore : undefined,
+      store: usePersistentStore ? this._store : undefined
     });
+
     this._seq = new SequenceCounter();
 
     if (config.sampleRate !== undefined && config.sampleRate < 1) {
@@ -226,35 +204,15 @@ export class WinceClient extends BaseClient {
     // consent is OK and enrichment (if configured) has resolved.
     this._enrichmentReady = !config.enrichmentUrl;
 
-    this._transport = createClientTransport({
-      url: config.endpoint,
-      compress: config.compress,
-      batchSize: config.batchSize,
-      batchTimeoutMs: config.batchTimeoutMs,
-      maxBufferSize: config.maxBufferSize,
-      headers: config.headers,
-      retry: config.retry,
-      fetch: config.fetch,
-      paused: true,
-      onDropped: (reason, item) => {
-        this._diag.droppedByReason[reason] =
-          (this._diag.droppedByReason[reason] ?? 0) + 1;
-        this._onEventDropped?.(reason, item);
-      },
-      onBatchDelivered: (eids) => {
-        this._diag.sent += eids.length;
-      },
-    });
-
     // React to consent status changes.
     if (this._consent !== null) {
       this._unsubConsent = wireConsent(this._consent, config.cookieless, {
         onGrant: () => this._maybeStart(),
         onRevoke: () => this._transport.pause(),
         onMigrate: () => {
-          this._identity.migrateToStore(this._minStore);
-          this._session.migrateToStore(this._minStore);
-        },
+          this._identity.migrateToStore(this._store);
+          this._session.migrateToStore(this._store);
+        }
       });
     }
 
@@ -268,10 +226,7 @@ export class WinceClient extends BaseClient {
 
     // Kick off enrichment or start the transport immediately.
     if (config.enrichmentUrl) {
-      void this._runEnrichment(
-        config.enrichmentUrl,
-        config.enrichmentTimeoutMs ?? 1_500,
-      );
+      void this._runEnrichment(config.enrichmentUrl, config.enrichmentTimeoutMs ?? 1_500);
     } else {
       this._maybeStart();
     }
@@ -296,16 +251,13 @@ export class WinceClient extends BaseClient {
     name: string,
     props?: T,
     personProps?: PersonProps,
-    options?: TrackOptions,
+    priority?: EventPriority
   ): void {
     if (this._consent !== null && !this._consent.isGranted()) {
       this._drop('consent');
       return;
     }
-    if (
-      this._sampler &&
-      !this._sampler.shouldTrack(this._identity.getAnonId())
-    ) {
+    if (this._sampler && !this._sampler.shouldTrack(this._identity.getAnonId())) {
       this._drop('sampling');
       return;
     }
@@ -316,7 +268,7 @@ export class WinceClient extends BaseClient {
       undefined,
       personProps,
       undefined,
-      options?.priority,
+      priority ?? EventPriority.Normal
     );
   }
 
@@ -330,10 +282,7 @@ export class WinceClient extends BaseClient {
       this._drop('consent');
       return;
     }
-    if (
-      this._sampler &&
-      !this._sampler.shouldTrack(this._identity.getAnonId())
-    ) {
+    if (this._sampler && !this._sampler.shouldTrack(this._identity.getAnonId())) {
       this._drop('sampling');
       return;
     }
@@ -355,16 +304,13 @@ export class WinceClient extends BaseClient {
       '$page_view',
       {
         title: typeof document !== 'undefined' ? document.title : undefined,
-        ref:
-          typeof document !== 'undefined'
-            ? document.referrer || undefined
-            : undefined,
-        ...props,
+        ref: typeof document !== 'undefined' ? document.referrer || undefined : undefined,
+        ...props
       },
       this._pageviewId,
       this._prevPageviewId,
       undefined,
-      false, // dedup already checked and recorded above — skip the check in _enqueueRaw
+      false // dedup already checked and recorded above — skip the check in _enqueueRaw
     );
   }
 
@@ -376,13 +322,7 @@ export class WinceClient extends BaseClient {
   identify(uid: string, traits?: PersonProps): void {
     this._identity.identify(uid, traits);
     if (traits?.$set || traits?.$set_once) {
-      this._enqueueRaw(
-        '$identify',
-        undefined,
-        this._pageviewId,
-        undefined,
-        traits,
-      );
+      this._enqueueRaw('$identify', undefined, this._pageviewId, undefined, traits);
     }
   }
 
@@ -459,7 +399,7 @@ export class WinceClient extends BaseClient {
         () => this._identity.getAnonId(),
         () => this._session.getSid(),
         this._fetch,
-        timeoutMs,
+        timeoutMs
       );
       if (res) {
         if (res.uid) this.identify(res.uid, res.personProps);
@@ -479,7 +419,7 @@ export class WinceClient extends BaseClient {
         const { events } = applyEnrichmentOnceToEvents(
           queue,
           this._enrichmentProps,
-          this._enrichmentPersonProps,
+          this._enrichmentPersonProps
         );
         // Clear one-shot enrichment props after applying
         this._enrichmentProps = undefined;
@@ -495,16 +435,12 @@ export class WinceClient extends BaseClient {
    * support tooling, and debugging dropped events.
    */
   diagnostics(): WinceDiagnostics {
-    const base = buildBaseDiagnostics(
-      this._diag,
-      this._transport,
-      Promise.resolve(0),
-    );
+    const base = buildBaseDiagnostics(this._diag, this._transport, Promise.resolve(0));
     return {
       ...base,
       sessionId: this._session.peekSid(),
       windowId: this._windowId,
-      anonId: this._identity.getAnonId(),
+      anonId: this._identity.getAnonId()
     };
   }
 
@@ -524,7 +460,7 @@ export class WinceClient extends BaseClient {
     prev_pageview_id?: string,
     personProps?: PersonProps,
     dedupKey?: string | false, // string = override key; false = skip dedup (already checked by caller)
-    priority?: EventPriority,
+    priority?: EventPriority
   ): void {
     // Client-side dedup: drop repeated identical event+props within the TTL window.
     if (dedupKey !== false) {
@@ -557,24 +493,18 @@ export class WinceClient extends BaseClient {
       $set: personProps?.$set,
       $set_once: personProps?.$set_once,
       url: typeof document !== 'undefined' ? document.URL : undefined,
-      ref:
-        typeof document !== 'undefined'
-          ? document.referrer || undefined
-          : undefined,
+      ref: typeof document !== 'undefined' ? document.referrer || undefined : undefined,
       wid: this._windowId,
       pvid: pageview_id,
       prev_pvid: prev_pageview_id,
       anon_prev: this._identity.getAndClearAnonPrev(),
+      priority: priority ?? EventPriority.Normal
     };
-
-    // Stamp delivery priority so the Transport can route to the correct lane.
-    if (priority) raw._priority = priority;
 
     // Record error EID so subsequent events can be tagged with $near_error.
     if (name === '$error') {
       this._lastErrorEid = eid;
-      if (this._lastErrorTimer !== undefined)
-        clearTimeout(this._lastErrorTimer);
+      if (this._lastErrorTimer !== undefined) clearTimeout(this._lastErrorTimer);
       this._lastErrorTimer = setTimeout(() => {
         this._lastErrorEid = undefined;
       }, 30_000);
@@ -592,21 +522,19 @@ export class WinceClient extends BaseClient {
 
   /** Apply one-shot enrichment props to a raw event, then clear them. */
   //TODO need review and optimization, the type of the enrichment and _enrichmentPersonProps is not clear
-  // TODO cache the result of enrichement to avoid fetching from server multiple times 
+  // TODO cache the result of enrichement to avoid fetching from server multiple times
   //use @wince/cache to cache the result of enrichment
   private _applyEnrichmentOnce(raw: TrackEventPayload): TrackEventPayload {
     if (!this._enrichmentProps && !this._enrichmentPersonProps) return raw;
     const result: TrackEventPayload = {
       ...raw,
-      props: this._enrichmentProps
-        ? { ...this._enrichmentProps, ...raw.props }
-        : raw.props,
+      props: this._enrichmentProps ? { ...this._enrichmentProps, ...raw.props } : raw.props,
       $set: this._enrichmentPersonProps
         ? { ...this._enrichmentPersonProps.$set, ...raw.$set }
         : raw.$set,
       $set_once: this._enrichmentPersonProps
         ? { ...this._enrichmentPersonProps.$set_once, ...raw.$set_once }
-        : raw.$set_once,
+        : raw.$set_once
     };
     this._enrichmentProps = undefined;
     this._enrichmentPersonProps = undefined;
@@ -653,8 +581,7 @@ export class WinceClient extends BaseClient {
 
     const applyConnectionConfig = () => {
       const cfg = _batchConfigForConnection(conn?.effectiveType ?? '');
-      if (cfg)
-        this._transport.updateBatchConfig(cfg.batchSize, cfg.batchTimeoutMs);
+      if (cfg) this._transport.updateBatchConfig(cfg.batchSize, cfg.batchTimeoutMs);
     };
 
     if (conn) {
@@ -707,7 +634,10 @@ function _batchConfigForConnection(effectiveType: string): BatchConfig | null {
  * wince.track('page_view');
  * ```
  */
+
 export function init(config: WinceConfig): WinceClient {
+  const transportOpts: TransportOptions<TrackEventPayload> = config.transportOptions;
+
   return new WinceClient(config);
 }
 export function activatePlugins(client: WinceClient): void {

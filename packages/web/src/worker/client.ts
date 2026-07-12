@@ -12,19 +12,14 @@
  * - Worker unavailable → `WinceClient`  (everything on main thread)
  */
 
-import { createClientTransport } from '@wince/transport';
 import { wireConsent } from '../lib/consentWire';
-import { uuidv7 } from '@wince/core';
+import { uuidv7 } from '@wince/utils';
 import type { PersonProps } from '@wince/core';
 import type { WinceConfig, WinceDiagnostics } from '../client';
 import { WinceClient } from '../client';
 import { fetchEnrichment } from '../lib/enrichment';
 import { applyEnrichmentOnceToEvents } from '../lib/preEnrich';
-import type {
-  MainToWorkerMsg,
-  WorkerToMainMsg,
-  WorkerConfig,
-} from './messages';
+import type { MainToWorkerMsg, WorkerToMainMsg, WorkerConfig } from './messages';
 import { buildBaseDiagnostics } from '../lib/diagnostics';
 import { BaseClient } from '../lib/baseClient';
 import { type TrackEventPayload } from '@wince/types';
@@ -50,46 +45,14 @@ export class WorkerClient extends BaseClient {
 
   // idb_size_request round-trip tracking
   private _idbSizeSeq = 0;
-  private readonly _idbSizeResolvers = new Map<
-    number,
-    (size: number) => void
-  >();
+  private readonly _idbSizeResolvers = new Map<number, (size: number) => void>();
 
   constructor(config: WinceConfig, worker: Worker) {
-    super({
-      consent: config.consent,
-      fetch: config.fetch,
-      onEventDropped: config.onEventDropped,
-      enrichmentReady: !config.enrichmentUrl,
-    });
+    super(config);
 
     this._worker = worker;
-    this._worker.onmessage = (e: MessageEvent<WorkerToMainMsg>) =>
-      this._onMessage(e.data);
-    this._worker.onerror = (e) =>
-      console.error('[WorkerClient] Worker error', e);
-
-    // Transport — HTTP layer stays on the main thread
-    this._transport = createClientTransport({
-      url: config.endpoint,
-      compress: config.compress,
-      batchSize: config.batchSize,
-      batchTimeoutMs: config.batchTimeoutMs,
-      maxBufferSize: config.maxBufferSize,
-      headers: config.headers,
-      retry: config.retry,
-      fetch: config.fetch,
-      paused: true,
-      onDropped: (reason, item) => {
-        this._diag.droppedByReason[reason] =
-          (this._diag.droppedByReason[reason] ?? 0) + 1;
-        this._onEventDropped?.(reason, item);
-      },
-      onBatchDelivered: (eids) => {
-        this._diag.sent += eids.length;
-        this._post({ type: 'ack', eids });
-      },
-    });
+    this._worker.onmessage = (e: MessageEvent<WorkerToMainMsg>) => this._onMessage(e.data);
+    this._worker.onerror = (e) => console.error('[WorkerClient] Worker error', e);
 
     // Consent changes mirror to Transport
     if (this._consent !== null) {
@@ -98,7 +61,7 @@ export class WorkerClient extends BaseClient {
         onRevoke: () => this._transport.pause(),
         onMigrate: () => {
           this._post({ type: 'consent_change', granted: true });
-        },
+        }
       });
     }
 
@@ -108,8 +71,7 @@ export class WorkerClient extends BaseClient {
       sessionMaxDurationMs: config.sessionMaxDurationMs,
       sampleRate: config.sampleRate,
       cookieless: config.cookieless,
-      initialConsentGranted:
-        this._consent === null || this._consent.isGranted(),
+      initialConsentGranted: this._consent === null || this._consent.isGranted()
     };
     this._post({ type: 'init', config: workerConfig });
 
@@ -134,11 +96,7 @@ export class WorkerClient extends BaseClient {
   // Public API  (mirrors WinceClient)
   // -------------------------------------------------------------------------
 
-  track(
-    name: string,
-    props?: Record<string, unknown>,
-    personProps?: PersonProps,
-  ): void {
+  track(name: string, props?: Record<string, unknown>, personProps?: PersonProps): void {
     if (this._consent !== null && !this._consent.isGranted()) {
       this._drop('consent');
       return;
@@ -153,20 +111,18 @@ export class WorkerClient extends BaseClient {
     this._recentEvents.set(dedupKey, true);
 
     // One-shot enrichment props applied to the first event after init.
-    const mergedProps: Record<string, unknown> | undefined = this
-      ._enrichmentProps
+    const mergedProps: Record<string, unknown> | undefined = this._enrichmentProps
       ? { ...this._enrichmentProps, ...props }
       : props;
     this._enrichmentProps = undefined;
 
-    const mergedPersonProps: PersonProps | undefined = this
-      ._enrichmentPersonProps
+    const mergedPersonProps: PersonProps | undefined = this._enrichmentPersonProps
       ? {
           $set: { ...this._enrichmentPersonProps.$set, ...personProps?.$set },
           $set_once: {
             ...this._enrichmentPersonProps.$set_once,
-            ...personProps?.$set_once,
-          },
+            ...personProps?.$set_once
+          }
         }
       : personProps;
     this._enrichmentPersonProps = undefined;
@@ -176,14 +132,11 @@ export class WorkerClient extends BaseClient {
       name,
       props: mergedProps,
       url: typeof document !== 'undefined' ? document.URL : undefined,
-      ref:
-        typeof document !== 'undefined'
-          ? document.referrer || undefined
-          : undefined,
+      ref: typeof document !== 'undefined' ? document.referrer || undefined : undefined,
       window_id: this._windowId,
       pageview_id: this._pageviewId,
       $set: mergedPersonProps?.$set,
-      $set_once: mergedPersonProps?.$set_once,
+      $set_once: mergedPersonProps?.$set_once
     });
   }
 
@@ -202,8 +155,7 @@ export class WorkerClient extends BaseClient {
     this._recentEvents.set(dedupKey, true);
 
     // One-shot enrichment props applied to the first event after init.
-    const mergedProps: Record<string, unknown> | undefined = this
-      ._enrichmentProps
+    const mergedProps: Record<string, unknown> | undefined = this._enrichmentProps
       ? { ...this._enrichmentProps, ...props }
       : props;
     this._enrichmentProps = undefined;
@@ -219,22 +171,16 @@ export class WorkerClient extends BaseClient {
       name: '$page_view',
       props: {
         title: typeof document !== 'undefined' ? document.title : undefined,
-        ref:
-          typeof document !== 'undefined'
-            ? document.referrer || undefined
-            : undefined,
-        ...mergedProps,
+        ref: typeof document !== 'undefined' ? document.referrer || undefined : undefined,
+        ...mergedProps
       },
       url: typeof document !== 'undefined' ? document.URL : undefined,
-      ref:
-        typeof document !== 'undefined'
-          ? document.referrer || undefined
-          : undefined,
+      ref: typeof document !== 'undefined' ? document.referrer || undefined : undefined,
       window_id: this._windowId,
       pageview_id: this._pageviewId,
       prev_pageview_id: this._prevPageviewId,
       $set: mergedPersonProps?.$set,
-      $set_once: mergedPersonProps?.$set_once,
+      $set_once: mergedPersonProps?.$set_once
     });
   }
 
@@ -243,7 +189,7 @@ export class WorkerClient extends BaseClient {
       type: 'identify',
       uid,
       $set: traits?.$set,
-      $set_once: traits?.$set_once,
+      $set_once: traits?.$set_once
     });
   }
 
@@ -285,17 +231,18 @@ export class WorkerClient extends BaseClient {
    * `idbQueueSize` is a Promise that resolves to the IDB pending count.
    */
   diagnostics(): WinceDiagnostics {
-    const base = buildBaseDiagnostics(
-      this._diag,
-      this._transport,
-      this._requestIdbSize(),
-    );
+    const base = buildBaseDiagnostics(this._diag, this._transport, this._requestIdbSize());
     return {
       ...base,
       sessionId: undefined, // session lives in Worker — not available on main thread
       windowId: this._windowId,
-      anonId: undefined, // anon ID lives in Worker — not available on main thread
+      anonId: undefined // anon ID lives in Worker — not available on main thread
     };
+  }
+
+  override onBatchDelivered(eids: string[]) {
+    this._diag.sent += eids.length;
+    this._post({ type: 'ack', eids });
   }
 
   // -------------------------------------------------------------------------
@@ -313,7 +260,7 @@ export class WorkerClient extends BaseClient {
         () => this._workerAnon,
         () => this._workerSession,
         this._fetch,
-        timeoutMs,
+        timeoutMs
       );
       if (res) {
         if (res.uid) this.identify(res.uid, res.personProps);
@@ -332,7 +279,7 @@ export class WorkerClient extends BaseClient {
         const { events } = applyEnrichmentOnceToEvents(
           buffer,
           this._enrichmentProps,
-          this._enrichmentPersonProps,
+          this._enrichmentPersonProps
         );
         // Clear one-shot enrichment props after applying
         this._enrichmentProps = undefined;
@@ -462,16 +409,13 @@ export class WorkerClient extends BaseClient {
  */
 export function initWithWorker(
   config: WinceConfig,
-  workerUrl?: string,
+  workerUrl?: string
 ): WorkerClient | WinceClient {
   if (typeof Worker !== 'undefined') {
     try {
       const url = workerUrl
         ? // Explicit URL provided (UMD / CJS callers)
-          new URL(
-            workerUrl,
-            typeof location !== 'undefined' ? location.href : undefined,
-          )
+          new URL(workerUrl, typeof location !== 'undefined' ? location.href : undefined)
         : // ESM default: resolve relative to this module
           new URL('./tracker.worker.js', import.meta.url);
 

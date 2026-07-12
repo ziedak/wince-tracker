@@ -1,3 +1,4 @@
+import { EventPriority } from '@wince/types';
 import type { WinceClient } from '../client';
 import { FormAbandonType, pluginSource } from './types';
 
@@ -229,7 +230,7 @@ export function mountFormAbandon(
           $plugin_source: pluginSource.FormAbandon,
         },
         undefined,
-        { priority: 'high' },
+        EventPriority.High  
       );
     }
   };

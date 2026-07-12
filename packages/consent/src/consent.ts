@@ -20,6 +20,14 @@ export interface IConsent {
   isPending(): boolean;
   /** Subscribe to status changes. Returns an unsubscribe function. */
   onChange(callback: (status: ConsentStatus) => void): () => void;
+  /** Opt-in to tracking. */
+  optIn(): void;
+  /** Opt-out of tracking. */
+  optOut(): void;
+  /** Remove stored consent — reverts to PENDING on next load. */
+  clear(): void;
+  /** Returns true when the browser DNT signal is active and ignoreDnt is false. */
+  isDntActive(): boolean;
 }
 
 // ---------------------------------------------------------------------------

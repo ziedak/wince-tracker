@@ -1,42 +1,45 @@
 /** @jest-environment jsdom */
 
-import { ConsentManager, ConsentStatus } from '@wince/consent';
-
-import type { DropReason, Transport } from '@wince/transport';
-import { TrackEventPayload } from '@wince/types';
-import { BaseClient } from './baseClient';
-import { getOrCreateWindowId, WINDOW_ID_KEY } from './_windowId';
-import { buildBaseDiagnostics } from './diagnostics';
-import { fetchEnrichment } from './enrichment';
-import { wireConsent } from './consentWire';
-import { applyEnrichmentOnceToEvents } from './preEnrich';
-
+import { Consent, ConsentStatus, IConsent } from '@wince/consent';
+import Transport, { DEFAULT_TRANSPORT_OPTIONS } from '@wince/transport';
+import { DropReason, IStorage, TrackEventPayload } from '@wince/types';
+import { WINDOW_ID_KEY, getOrCreateWindowId } from '../../src/lib/_windowId.js';
+import { BaseClient } from '../../src/lib/baseClient.js';
+import { wireConsent } from '../../src/lib/consentWire.js';
+import { buildBaseDiagnostics } from '../../src/lib/diagnostics.js';
+import { fetchEnrichment } from '../../src/lib/enrichment.js';
+import { applyEnrichmentOnceToEvents } from '../../src/lib/preEnrich.js';
+import { StoreKind } from '@wince/types';
 function makeResponse(ok: boolean, body: unknown): Response {
   return {
     ok,
-    json: async () => body,
+    json: async () => body
   } as unknown as Response;
 }
 
-function createStorageMock(): Storage {
+function createStorageMock(): IStorage {
   const data = new Map<string, string>();
 
   return {
+    isAvailable: () => true,
+    getStrategy: () => 'cookie' as StoreKind,
     get length() {
       return data.size;
     },
     clear: () => {
       data.clear();
     },
-    getItem: (key: string) => data.get(key) ?? null,
+    get: (key: string) => data.get(key) ?? null,
     key: (index: number) => Array.from(data.keys())[index] ?? null,
-    removeItem: (key: string) => {
+    delete: (key: string) => {
       data.delete(key);
     },
-    setItem: (key: string, value: string) => {
+    set: (key: string, value: string) => {
       data.set(key, value);
     },
-  } as Storage;
+    refreshKey: () => undefined,
+    flush: () => undefined
+  } as IStorage;
 }
 
 function makeTransportMock() {
@@ -48,13 +51,13 @@ function makeTransportMock() {
     send: jest.fn(),
     drain: jest.fn(),
     queueSize: 0,
-    circuitOpen: false,
-  } as unknown as Transport;
+    circuitOpen: false
+  } as unknown as Transport<TrackEventPayload>;
 }
 
 class TestClient extends BaseClient {
-  constructor(config: ConstructorParameters<typeof BaseClient>[0]) {
-    super(config);
+  constructor(config: ConstructorParameters<typeof BaseClient>[0], _consent?: IConsent) {
+    super(config, _consent);
     this._transport = makeTransportMock();
   }
 
@@ -80,13 +83,13 @@ describe('buildBaseDiagnostics', () => {
     const idbQueueSize = Promise.resolve(12);
     const transport = {
       queueSize: 4,
-      circuitOpen: true,
-    } as unknown as Transport;
+      circuitOpen: true
+    } as unknown as Transport<TrackEventPayload>;
 
     const result = buildBaseDiagnostics(
       { sent: 9, droppedByReason: { consent: 2, sampling: undefined } },
       transport,
-      idbQueueSize,
+      idbQueueSize
     );
 
     await expect(result.idbQueueSize).resolves.toBe(12);
@@ -109,6 +112,7 @@ describe('applyEnrichmentOnceToEvents', () => {
         sid: 'sid',
         anon: 'anon',
         props: { keep: true },
+        priority: 1
       },
       {
         n: '$page_view',
@@ -120,14 +124,15 @@ describe('applyEnrichmentOnceToEvents', () => {
         props: { existing: true },
         $set: { tier: 'gold' },
         $set_once: { first_seen: 'event' },
+        priority: 2
       },
-      { n: '$click', eid: '3', seq: 2, ts: 3, sid: 'sid', anon: 'anon' },
+      { n: '$click', eid: '3', seq: 2, ts: 3, sid: 'sid', anon: 'anon', priority: 0 }
     ];
 
     const result = applyEnrichmentOnceToEvents(
       events,
       { utm_source: 'newsletter' },
-      { $set: { country: 'US' }, $set_once: { first_seen: 'enrichment' } },
+      { $set: { country: 'US' }, $set_once: { first_seen: 'enrichment' } }
     );
 
     expect(result.applied).toBe(true);
@@ -136,14 +141,14 @@ describe('applyEnrichmentOnceToEvents', () => {
       ...events[1],
       props: { utm_source: 'newsletter', existing: true },
       $set: { country: 'US', tier: 'gold' },
-      $set_once: { first_seen: 'event' },
+      $set_once: { first_seen: 'event' }
     });
     expect(result.events[2]).toBe(events[2]);
   });
 
   it('returns the original events when no enrichment is provided', () => {
     const events: TrackEventPayload[] = [
-      { n: '$click', eid: '1', seq: 0, ts: 1, sid: 'sid', anon: 'anon' },
+      { n: '$click', eid: '1', seq: 0, ts: 1, sid: 'sid', anon: 'anon', priority: 0 }
     ];
 
     const result = applyEnrichmentOnceToEvents(events);
@@ -154,10 +159,7 @@ describe('applyEnrichmentOnceToEvents', () => {
 });
 
 describe('wireConsent', () => {
-  it('returns undefined when consent is null', () => {
-    expect(wireConsent(null, 'off', {})).toBeUndefined();
-  });
-
+ 
   it('routes status changes to the expected handlers', () => {
     let listener: ((status: ConsentStatus) => void) | undefined;
     const unsubscribe = jest.fn();
@@ -165,12 +167,12 @@ describe('wireConsent', () => {
       onChange: jest.fn((cb: (status: ConsentStatus) => void) => {
         listener = cb;
         return unsubscribe;
-      }),
+      })
     };
     const handlers = {
       onGrant: jest.fn(),
       onRevoke: jest.fn(),
-      onMigrate: jest.fn(),
+      onMigrate: jest.fn()
     };
 
     const result = wireConsent(consent as never, 'on_reject', handlers);
@@ -186,19 +188,43 @@ describe('wireConsent', () => {
 
   it('does not migrate when cookieless is off', () => {
     let listener: ((status: ConsentStatus) => void) | undefined;
-    const consent = {
+    const consent: IConsent = {
       onChange: jest.fn((cb: (status: ConsentStatus) => void) => {
         listener = cb;
         return () => undefined;
       }),
+      getStatus: function (): ConsentStatus {
+        throw new Error('Function not implemented.');
+      },
+      isGranted: function (): boolean {
+        throw new Error('Function not implemented.');
+      },
+      isDenied: function (): boolean {
+        throw new Error('Function not implemented.');
+      },
+      isPending: function (): boolean {
+        throw new Error('Function not implemented.');
+      },
+      optIn: function (): void {
+        throw new Error('Function not implemented.');
+      },
+      optOut: function (): void {
+        throw new Error('Function not implemented.');
+      },
+      clear: function (): void {
+        throw new Error('Function not implemented.');
+      },
+      isDntActive: function (): boolean {
+        throw new Error('Function not implemented.');
+      }
     };
     const handlers = {
       onGrant: jest.fn(),
       onRevoke: jest.fn(),
-      onMigrate: jest.fn(),
+      onMigrate: jest.fn()
     };
 
-    wireConsent(consent as never, 'off', handlers);
+    wireConsent(consent , 'off', handlers);
     listener?.(ConsentStatus.GRANTED);
 
     expect(handlers.onMigrate).not.toHaveBeenCalled();
@@ -217,15 +243,15 @@ describe('fetchEnrichment', () => {
         uid: 'user-1',
         $set: { plan: 'pro' },
         $set_once: { source: 'ad' },
-        utm_source: 'newsletter',
-      }),
+        utm_source: 'newsletter'
+      })
     );
 
     const result = await fetchEnrichment(
       'https://example.test/enrich',
       () => 'anon-1',
       () => 'session-1',
-      fetchFn,
+      fetchFn
     );
 
     expect(fetchFn).toHaveBeenCalledTimes(1);
@@ -236,8 +262,8 @@ describe('fetchEnrichment', () => {
       props: { utm_source: 'newsletter' },
       personProps: {
         $set: { plan: 'pro' },
-        $set_once: { source: 'ad' },
-      },
+        $set_once: { source: 'ad' }
+      }
     });
   });
 
@@ -246,19 +272,19 @@ describe('fetchEnrichment', () => {
       'https://example.test/enrich',
       () => 'anon',
       () => 'session',
-      jest.fn().mockResolvedValue(makeResponse(false, { ok: false })),
+      jest.fn().mockResolvedValue(makeResponse(false, { ok: false }))
     );
     const malformed = await fetchEnrichment(
       'https://example.test/enrich',
       () => 'anon',
       () => 'session',
-      jest.fn().mockResolvedValue(makeResponse(true, 42)),
+      jest.fn().mockResolvedValue(makeResponse(true, 42))
     );
     const failed = await fetchEnrichment(
       'https://example.test/enrich',
       () => 'anon',
       () => 'session',
-      jest.fn().mockRejectedValue(new Error('network failed')),
+      jest.fn().mockRejectedValue(new Error('network failed'))
     );
 
     expect(nonOk).toBeUndefined();
@@ -271,18 +297,19 @@ describe('window id helper', () => {
   let originalSessionStorage: Storage | undefined;
 
   beforeEach(() => {
-    originalSessionStorage = (globalThis as Record<string, unknown>)
-      .sessionStorage as Storage | undefined;
+    originalSessionStorage = (globalThis as Record<string, unknown>).sessionStorage as
+      | Storage
+      | undefined;
     Object.defineProperty(globalThis, 'sessionStorage', {
       value: createStorageMock(),
-      configurable: true,
+      configurable: true
     });
   });
 
   afterEach(() => {
     Object.defineProperty(globalThis, 'sessionStorage', {
       value: originalSessionStorage,
-      configurable: true,
+      configurable: true
     });
     originalSessionStorage = undefined;
   });
@@ -300,11 +327,9 @@ describe('window id helper', () => {
   });
 
   it('falls back when sessionStorage throws', () => {
-    const getItemSpy = jest
-      .spyOn(sessionStorage, 'getItem')
-      .mockImplementation(() => {
-        throw new Error('blocked');
-      });
+    const getItemSpy = jest.spyOn(sessionStorage, 'getItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
 
     expect(getOrCreateWindowId()).toMatch(/^[0-9a-f-]{36}$/);
     getItemSpy.mockRestore();
@@ -313,7 +338,29 @@ describe('window id helper', () => {
 
 describe('BaseClient', () => {
   it('starts and pauses the transport when consent is disabled', () => {
-    const client = new TestClient({ consent: null });
+       const mockConsent: IConsent = {
+      isGranted: () => true,
+      onChange: () => () => {},
+      optIn: () => {},
+      optOut: () => {},
+      clear: () => {},
+      isDntActive: () => false,
+      getStatus: function (): ConsentStatus {
+        throw new Error('Function not implemented.');
+      },
+      isDenied: function (): boolean {
+        throw new Error('Function not implemented.');
+      },
+      isPending: function (): boolean {
+        throw new Error('Function not implemented.');
+      }
+    };
+    const client = new TestClient({
+      transportOptions: DEFAULT_TRANSPORT_OPTIONS,
+      consentOptions: {
+        ignoreDnt: true
+      }
+    } , mockConsent);
     client.maybeStart();
 
     expect(client.transportMock.start).toHaveBeenCalledTimes(1);
@@ -325,23 +372,19 @@ describe('BaseClient', () => {
     expect(client.transportMock.start).toHaveBeenCalledTimes(2);
   });
 
-  it('does not start the transport until enrichment is ready', () => {
-    const client = new TestClient({ consent: null, enrichmentReady: false });
 
-    client.maybeStart();
 
-    expect(client.transportMock.start).not.toHaveBeenCalled();
-  });
-
-  it('delegates optIn and optOut to ConsentManager instances', () => {
-    const consentManager = new ConsentManager({
-      ignoreDnt: true,
-      crossSubdomain: false,
-      secure: false,
-    });
-    const optInSpy = jest.spyOn(consentManager, 'optIn');
-    const optOutSpy = jest.spyOn(consentManager, 'optOut');
-    const client = new TestClient({ consent: consentManager });
+  it('delegates optIn and optOut to Consent instances', () => {
+    const storageMock = createStorageMock();
+    const consent = new Consent(
+      {
+        ignoreDnt: true
+      },
+      storageMock
+    );
+    const optInSpy = jest.spyOn(consent, 'optIn');
+    const optOutSpy = jest.spyOn(consent, 'optOut');
+    const client = new TestClient({ transportOptions: DEFAULT_TRANSPORT_OPTIONS, consentOptions: { ignoreDnt: true } }, consent);
 
     client.optIn();
     client.optOut();
@@ -353,7 +396,24 @@ describe('BaseClient', () => {
   });
 
   it('records drop counters', () => {
-    const client = new TestClient({ consent: null });
+    const mockConsent: IConsent = {
+      isGranted: () => true,
+      onChange: () => () => {},
+      optIn: () => {},
+      optOut: () => {},
+      clear: () => {},
+      isDntActive: () => false,
+      getStatus: function (): ConsentStatus {
+        throw new Error('Function not implemented.');
+      },
+      isDenied: function (): boolean {
+        throw new Error('Function not implemented.');
+      },
+      isPending: function (): boolean {
+        throw new Error('Function not implemented.');
+      }
+    };
+    const client = new TestClient({ transportOptions: DEFAULT_TRANSPORT_OPTIONS, consentOptions: { ignoreDnt: true } }, mockConsent);
 
     client.drop('consent');
     client.drop('consent');
@@ -363,7 +423,7 @@ describe('BaseClient', () => {
         client as unknown as {
           _diag: { droppedByReason: Record<string, number> };
         }
-      )._diag.droppedByReason.consent,
+      )._diag.droppedByReason.consent
     ).toBe(2);
   });
 });

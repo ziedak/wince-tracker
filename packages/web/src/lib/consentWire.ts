@@ -1,5 +1,5 @@
 import { ConsentStatus } from '@wince/consent';
-import type { ConsentProvider } from '@wince/consent';
+import type { IConsent } from '@wince/consent';
 
 export type ConsentWireHandlers = {
   onGrant?: () => void;
@@ -12,9 +12,9 @@ export type ConsentWireHandlers = {
  * or `undefined` when `consent` is `null`.
  */
 export function wireConsent(
-  consent: ConsentProvider | null,
+  consent: IConsent,
   cookieless: 'off' | 'on_reject' | 'always' | undefined,
-  handlers: ConsentWireHandlers,
+  handlers: ConsentWireHandlers
 ): (() => void) | undefined {
   if (consent === null) return undefined;
 

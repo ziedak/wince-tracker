@@ -1,3 +1,4 @@
+import { EventPriority } from '@wince/types';
 import type { WinceClient } from '../client';
 import { useBroadCapture } from './_click-utils';
 import { pluginSource, RageClickType } from './types';
@@ -28,10 +29,7 @@ interface ClickRecord {
  *
  * @returns A cleanup function that removes the event listener.
  */
-export function mountRageClick(
-  tracker: WinceClient,
-  options?: RageClickOptions,
-): () => void {
+export function mountRageClick(tracker: WinceClient, options?: RageClickOptions): () => void {
   if (typeof document === 'undefined') return () => undefined;
 
   const threshold = options?.threshold ?? 3;
@@ -72,7 +70,7 @@ export function mountRageClick(
           elements_chain: data.elements_chain,
           count: rec.count,
           first_at: rec.firstAt,
-          $plugin_source: pluginSource.RageClick,
+          $plugin_source: pluginSource.RageClick
         };
 
         if (data.href) props['href'] = data.href;
@@ -87,9 +85,7 @@ export function mountRageClick(
         }
         if (Object.keys(attrs).length > 0) props['attrs'] = attrs;
 
-        tracker.track<RageClickType>('$rage_click', props, undefined, {
-          priority: 'critical',
-        });
+        tracker.track<RageClickType>('$rage_click', props, undefined, EventPriority.Critical);
       }
     } else {
       if (rec) {
@@ -99,7 +95,7 @@ export function mountRageClick(
       records.set(el, {
         count: 1,
         firstAt: now,
-        timer: armTimer(el, idleMs),
+        timer: armTimer(el, idleMs)
       });
     }
   });

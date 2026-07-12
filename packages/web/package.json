@@ -44,5 +44,14 @@
     "@wince/storage": "workspace:*",
     "@wince/types": "workspace:*",
     "fflate": "*"
+  },
+  "nx": {
+    "targets": {
+      "build": {
+        "options": {
+          "buildableProjectDepsInPackageJson": "none"
+        }
+      }
+    }
   }
 }
