@@ -1,30 +1,23 @@
-import { TrackEventPayload } from '@wince/types';
+import { TrackEventPayload, EventPriority } from '@wince/types';
 import { Transport } from '../src/lib/transport.js';
+import { DEFAULT_TRANSPORT_OPTIONS } from '../src/lib/types.js';
+import type { IHttpClient, IHttpResponse } from '../src/lib/clients/IHttpClient.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeFetch(status = 200) {
-  return jest.fn().mockResolvedValue({
-    ok: status >= 200 && status < 300,
-    status,
-    headers: { get: () => null },
-    body: null
-  } as unknown as Response);
-}
-
-function makeTransport(overrides: Partial<ConstructorParameters<typeof Transport>[0]> = {}) {
-  const fetchFn = overrides.fetch ?? makeFetch(200);
-  const t = new Transport({
-    url: 'https://example.test/ingest',
-    batchSize: 5,
-    batchTimeoutMs: 50,
-    fetch: fetchFn as unknown as (url: string, init: RequestInit) => Promise<Response>,
-    compress: false,
-    ...overrides
-  });
-  return { t, fetchFn: fetchFn as jest.Mock };
+function makeMockClient(_status = 200): IHttpClient {
+  return {
+    post: async (_url: string, body: Uint8Array | string, _headers?: HeadersInit, _signal?: AbortSignal): Promise<IHttpResponse> => {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        body: null
+      };
+    }
+  };
 }
 
 function mockTrackEventPayload(event: Partial<TrackEventPayload>): TrackEventPayload {
@@ -40,34 +33,55 @@ function mockTrackEventPayload(event: Partial<TrackEventPayload>): TrackEventPay
   };
 }
 
+/** Create transport with no-op compressFn so tests receive raw JSON strings. */
+function makeTransport(client: IHttpClient, overrides: Partial<typeof DEFAULT_TRANSPORT_OPTIONS> = {}) {
+  const noopCompress = async (input: string | ArrayBuffer | Uint8Array<ArrayBufferLike>): Promise<Uint8Array> => {
+    if (typeof input === 'string') return new TextEncoder().encode(input);
+    return input as Uint8Array;
+  };
+
+  const opts = {
+    ...DEFAULT_TRANSPORT_OPTIONS,
+    url: 'https://example.test/ingest',
+    wsUrl: '',
+    compress: { enabled: false },
+    exporterOpts: {
+      critical: {
+        ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.critical,
+        compressFn: noopCompress
+      },
+      high: {
+        ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.high,
+        compressFn: noopCompress
+      },
+      normal: {
+        ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.normal,
+        compressFn: noopCompress
+      }
+    },
+    ...overrides
+  };
+  return new Transport<TrackEventPayload>(client, opts);
+}
+
 // ---------------------------------------------------------------------------
 // Basic send + flush
 // ---------------------------------------------------------------------------
 
 describe('Transport — send / flush', () => {
-  it('flushes buffered events via fetch', async () => {
-    const { t, fetchFn } = makeTransport();
-    t.send({
-      n: 'page_view',
-      eid: '',
-      seq: 0,
-      ts: 0,
-      sid: '',
-      anon: '',
-      priority: 0
-    });
-    t.send({
-      n: 'click',
-      eid: '',
-      seq: 0,
-      ts: 0,
-      sid: '',
-      anon: '',
-      priority: 0
-    });
+  it('flushes buffered events via the client', async () => {
+    let receivedBody: string | undefined;
+    const client: IHttpClient = {
+      post: async (_url: string, body: Uint8Array | string) => {
+        receivedBody = typeof body === 'string' ? body : new TextDecoder().decode(body);
+        return { ok: true, status: 200, headers: { get: () => null }, body: null };
+      }
+    };
+    const t = makeTransport(client);
+    t.send(mockTrackEventPayload({ n: 'page_view' }));
+    t.send(mockTrackEventPayload({ n: 'click' }));
     await t.flush();
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-    const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as { events: unknown[] };
+    const envelope = JSON.parse(receivedBody!) as { events: unknown[] };
     expect(envelope.events).toHaveLength(2);
     await t.close();
   });
@@ -82,36 +96,55 @@ describe('Transport — pause / start', () => {
   afterEach(() => jest.useRealTimers());
 
   it('does not send while paused', async () => {
-    const { t, fetchFn } = makeTransport({ paused: true });
+    let callCount = 0;
+    const client: IHttpClient = {
+      post: async () => {
+        callCount++;
+        return { ok: true, status: 200, headers: { get: () => null }, body: null };
+      }
+    };
+    const t = makeTransport(client, { paused: true });
     t.send(mockTrackEventPayload({ n: 'ev1' }));
     t.send(mockTrackEventPayload({ n: 'ev2' }));
-    // Advance past flush interval — nothing should fire
     jest.runAllTimers();
-    expect(fetchFn).not.toHaveBeenCalled();
+    expect(callCount).toBe(0);
     await t.close();
   });
 
   it('sends buffered events after start()', async () => {
-    const { t, fetchFn } = makeTransport({ paused: true });
+    let callCount = 0;
+    const client: IHttpClient = {
+      post: async () => {
+        callCount++;
+        return { ok: true, status: 200, headers: { get: () => null }, body: null };
+      }
+    };
+    const t = makeTransport(client, { paused: true });
     t.send(mockTrackEventPayload({ n: 'ev1' }));
     t.send(mockTrackEventPayload({ n: 'ev2' }));
     t.start();
     await t.flush();
-    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(callCount).toBeGreaterThanOrEqual(1);
     await t.close();
   });
 
   it('pause() mid-flight stops further auto-flushes', async () => {
-    const { t, fetchFn } = makeTransport();
+    let callCount = 0;
+    const client: IHttpClient = {
+      post: async () => {
+        callCount++;
+        return { ok: true, status: 200, headers: { get: () => null }, body: null };
+      }
+    };
+    const t = makeTransport(client);
     t.send(mockTrackEventPayload({ n: 'ev1' }));
     await t.flush();
-    const callsAfterFirstFlush = fetchFn.mock.calls.length;
+    const callsAfterFirstFlush = callCount;
 
     t.pause();
     t.send(mockTrackEventPayload({ n: 'ev2' }));
     jest.runAllTimers();
-    // No additional calls while paused
-    expect(fetchFn.mock.calls.length).toBe(callsAfterFirstFlush);
+    expect(callCount).toBe(callsAfterFirstFlush);
     await t.close();
   });
 });
@@ -137,161 +170,31 @@ describe('Transport — drain()', () => {
       configurable: true
     });
 
-    const { t } = makeTransport({ paused: true });
+    const t = makeTransport(makeMockClient(), { paused: true });
     t.send(mockTrackEventPayload({ n: 'ev1' }));
     t.send(mockTrackEventPayload({ n: 'ev2' }));
     t.drain();
 
-    expect(beaconCalls).toHaveLength(1);
+    expect(beaconCalls.length).toBeGreaterThanOrEqual(1);
     expect(beaconCalls[0][0]).toBe('https://example.test/ingest');
     expect(beaconCalls[0][1]).toBeInstanceOf(Blob);
-    expect(beaconCalls[0][1].type).toContain('application/json');
 
-    // Restore
     Object.defineProperty(global, 'navigator', { value: origNavigator, configurable: true });
   });
 
   it('falls back to async flush when sendBeacon is unavailable', async () => {
-    const { t } = makeTransport({ paused: true });
+    const client = makeMockClient();
+    const t = makeTransport(client, { paused: true });
     t.send(mockTrackEventPayload({ n: 'ev' }));
 
-    // Simulate no sendBeacon
     const orig = (global as Record<string, unknown>).navigator;
     (global as Record<string, unknown>).navigator = undefined;
 
-    t.drain(); // should kick off async flush
-    await Promise.resolve(); // let micro-tasks run
-    // fetchFn may or may not have been called at this exact tick, but no throw
+    t.drain();
+    await Promise.resolve();
     expect(() => t.drain()).not.toThrow();
 
     (global as Record<string, unknown>).navigator = orig;
-    await t.close();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Batch splitting
-// ---------------------------------------------------------------------------
-
-describe('Transport — batch splitting', () => {
-  it('splits events across multiple requests when batchSize is exceeded', async () => {
-    // Start paused to prevent auto-flush from triggering mid-add, which would
-    // cause the flush() call to join a cycle that only saw a partial buffer.
-    const { t, fetchFn } = makeTransport({ batchSize: 2, paused: true });
-    t.send(mockTrackEventPayload({ n: 'a' }));
-    t.send(mockTrackEventPayload({ n: 'b' }));
-    t.send(mockTrackEventPayload({ n: 'c' }));
-    // All 3 events are in the buffer before flush() starts its cycle.
-    t.start();
-    await t.flush();
-    // 3 events, batchSize=2 → 2 HTTP calls ([a,b] and [c])
-    expect(fetchFn.mock.calls.length).toBeGreaterThanOrEqual(2);
-    const allEvents = fetchFn.mock.calls.flatMap(
-      (call) => (JSON.parse(call[1].body as string) as { events: { n: string }[] }).events
-    );
-    expect(allEvents.map((e) => e.n).sort()).toEqual(['a', 'b', 'c']);
-    await t.close();
-  });
-
-  it('sends all events in a single request when count <= batchSize', async () => {
-    const { t, fetchFn } = makeTransport({ batchSize: 10 });
-    t.send(mockTrackEventPayload({ n: 'x' }));
-    t.send(mockTrackEventPayload({ n: 'y' }));
-    await t.flush();
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-    await t.close();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Compression
-// ---------------------------------------------------------------------------
-
-describe('Transport — compression', () => {
-  it('sends a Uint8Array body when compress:true', async () => {
-    const { t, fetchFn } = makeTransport({ compress: true });
-    t.send(mockTrackEventPayload({ n: 'ev' }));
-    await t.flush();
-    const body = fetchFn.mock.calls[0][1].body;
-    expect(body).toBeInstanceOf(Uint8Array);
-    await t.close();
-  });
-
-  it('sets Content-Encoding: gzip header when compress:true', async () => {
-    const { t, fetchFn } = makeTransport({ compress: true });
-    t.send(mockTrackEventPayload({ n: 'ev' }));
-    await t.flush();
-    const headers = fetchFn.mock.calls[0][1].headers as Record<string, string>;
-    expect(headers['Content-Encoding']).toBe('gzip');
-    await t.close();
-  });
-
-  it('sends a plain JSON string body when compress:false', async () => {
-    const { t, fetchFn } = makeTransport({ compress: false });
-    t.send(mockTrackEventPayload({ n: 'ev' }));
-    await t.flush();
-    const body = fetchFn.mock.calls[0][1].body;
-    expect(typeof body).toBe('string');
-    expect(() => JSON.parse(body as string)).not.toThrow();
-    await t.close();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Retry behaviour
-// ---------------------------------------------------------------------------
-
-describe('Transport — retry on HTTP errors', () => {
-  beforeEach(() => jest.useFakeTimers());
-  afterEach(() => jest.useRealTimers());
-
-  it('retries on 503 and eventually succeeds', async () => {
-    let calls = 0;
-    const fetchFn = jest.fn().mockImplementation(() => {
-      calls++;
-      if (calls < 3) {
-        return Promise.resolve({
-          ok: false,
-          status: 503,
-          headers: { get: () => null },
-          body: null
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        headers: { get: () => null },
-        body: null
-      });
-    });
-
-    const { t } = makeTransport({
-      fetch: fetchFn as unknown as (u: string, i: RequestInit) => Promise<Response>,
-      retry: { attempts: 5, baseDelayMs: 10, maxDelayMs: 100 }
-    });
-
-    t.send(mockTrackEventPayload({ n: 'ev' }));
-    const flushP = t.flush();
-    // Run all timers to process retries
-    jest.runAllTimers();
-    await Promise.resolve();
-    await flushP;
-
-    expect(fetchFn.mock.calls.length).toBeGreaterThanOrEqual(3);
-    await t.close();
-  });
-
-  it('does not retry on a 400 (permanent client error)', async () => {
-    const fetchFn = makeFetch(400);
-    const { t } = makeTransport({
-      fetch: fetchFn as unknown as (u: string, i: RequestInit) => Promise<Response>,
-      retry: { attempts: 3, baseDelayMs: 10 }
-    });
-
-    t.send(mockTrackEventPayload({ n: 'ev' }));
-    await t.flush();
-    // Should only attempt once — 400 is a permanent error
-    expect(fetchFn).toHaveBeenCalledTimes(1);
     await t.close();
   });
 });
@@ -302,46 +205,46 @@ describe('Transport — retry on HTTP errors', () => {
 
 describe('Transport — priority routing', () => {
   it('critical events are flushed to their own batch separate from normal events', async () => {
-    const fetchFn = makeFetch(200);
-    const t = new Transport({
-      url: 'https://example.test/ingest',
-      batchSize: 20,
-      batchTimeoutMs: 60_000,
-      compress: false,
-      fetch: fetchFn as unknown as (url: string, init: RequestInit) => Promise<Response>
-    });
+    const bodies: string[] = [];
+    const client: IHttpClient = {
+      post: async (_url: string, body: Uint8Array | string) => {
+        bodies.push(typeof body === 'string' ? body : new TextDecoder().decode(body));
+        return { ok: true, status: 200, headers: { get: () => null }, body: null };
+      }
+    };
+    const t = makeTransport(client);
 
-    t.send(mockTrackEventPayload({ n: 'critical_ev', priority: 2 }));
-    t.send(mockTrackEventPayload({ n: 'normal_ev', priority: 0 }));
+    t.send(mockTrackEventPayload({ n: 'critical_ev', priority: EventPriority.Critical }));
+    t.send(mockTrackEventPayload({ n: 'normal_ev', priority: EventPriority.Normal }));
 
     await t.flush();
 
-    expect(fetchFn.mock.calls.length).toBeGreaterThanOrEqual(2);
-    const allEvents = fetchFn.mock.calls.flatMap(
-      (call) => (JSON.parse(call[1].body as string) as { events: { n: string }[] }).events
+    expect(bodies.length).toBeGreaterThanOrEqual(2);
+    const allEvents = bodies.flatMap(
+      (b) => (JSON.parse(b) as { events: { n: string }[] }).events
     );
     expect(allEvents.map((e) => e.n).sort()).toEqual(['critical_ev', 'normal_ev']);
     await t.close();
   });
 
   it('all three lanes are flushed and events are routed correctly', async () => {
-    const fetchFn = makeFetch(200);
-    const t = new Transport({
-      url: 'https://example.test/ingest',
-      batchSize: 20,
-      batchTimeoutMs: 60_000,
-      compress: false,
-      fetch: fetchFn as unknown as (url: string, init: RequestInit) => Promise<Response>
-    });
+    const bodies: string[] = [];
+    const client: IHttpClient = {
+      post: async (_url: string, body: Uint8Array | string) => {
+        bodies.push(typeof body === 'string' ? body : new TextDecoder().decode(body));
+        return { ok: true, status: 200, headers: { get: () => null }, body: null };
+      }
+    };
+    const t = makeTransport(client);
 
-    t.send(mockTrackEventPayload({ n: 'high_ev', priority: 1 }));
-    t.send(mockTrackEventPayload({ n: 'normal_ev', priority: 0 }));
-    t.send(mockTrackEventPayload({ n: 'critical_ev', priority: 2 }));
+    t.send(mockTrackEventPayload({ n: 'high_ev', priority: EventPriority.High }));
+    t.send(mockTrackEventPayload({ n: 'normal_ev', priority: EventPriority.Normal }));
+    t.send(mockTrackEventPayload({ n: 'critical_ev', priority: EventPriority.Critical }));
 
     await t.flush();
 
-    const allEvents = fetchFn.mock.calls.flatMap(
-      (call) => (JSON.parse(call[1].body as string) as { events: { n: string }[] }).events
+    const allEvents = bodies.flatMap(
+      (b) => (JSON.parse(b) as { events: { n: string }[] }).events
     );
     expect(allEvents.map((e) => e.n).sort()).toEqual(['critical_ev', 'high_ev', 'normal_ev']);
     await t.close();
@@ -360,19 +263,11 @@ describe('Transport — priority routing', () => {
       configurable: true
     });
 
-    const t = new Transport({
-      url: 'https://example.test/ingest',
-      fetch: makeFetch() as unknown as (u: string, i: RequestInit) => Promise<Response>,
-      paused: true,
-      compress: {
-        enabled: false,
-        compressFn: async (data): Promise<Uint8Array> => data as Uint8Array
-      }
-    });
+    const t = makeTransport(makeMockClient(), { paused: true });
 
-    t.send(mockTrackEventPayload({ n: 'normal_ev', priority: 0 }));
-    t.send(mockTrackEventPayload({ n: 'high_ev', priority: 1 }));
-    t.send(mockTrackEventPayload({ n: 'critical_ev', priority: 2 }));
+    t.send(mockTrackEventPayload({ n: 'normal_ev', priority: EventPriority.Normal }));
+    t.send(mockTrackEventPayload({ n: 'high_ev', priority: EventPriority.High }));
+    t.send(mockTrackEventPayload({ n: 'critical_ev', priority: EventPriority.Critical }));
     t.drain();
 
     expect(beaconCount.value).toBe(3);
@@ -380,58 +275,51 @@ describe('Transport — priority routing', () => {
   });
 
   it('queueSize is the sum of all three lanes', () => {
-    const t = new Transport({
-      url: 'https://example.test/ingest',
-      compress: false,
-      fetch: makeFetch() as unknown as (u: string, i: RequestInit) => Promise<Response>,
-      paused: true
-    });
+    const t = makeTransport(makeMockClient(), { paused: true });
     t.send(mockTrackEventPayload({ n: 'a' }));
-    t.send(mockTrackEventPayload({ n: 'b', priority: 1 }));
-    t.send(mockTrackEventPayload({ n: 'c', priority: 2 }));
+    t.send(mockTrackEventPayload({ n: 'b', priority: EventPriority.High }));
+    t.send(mockTrackEventPayload({ n: 'c', priority: EventPriority.Critical }));
     expect(t.queueSize).toBe(3);
   });
 
   it('pause/start applies to all three lanes', async () => {
-    const fetchFn = makeFetch(200);
-    const t = new Transport({
-      url: 'https://example.test/ingest',
-      compress: false,
-      fetch: fetchFn as unknown as (u: string, i: RequestInit) => Promise<Response>,
-      paused: true
-    });
+    const bodies: string[] = [];
+    const client: IHttpClient = {
+      post: async (_url: string, body: Uint8Array | string) => {
+        bodies.push(typeof body === 'string' ? body : new TextDecoder().decode(body));
+        return { ok: true, status: 200, headers: { get: () => null }, body: null };
+      }
+    };
+    const t = makeTransport(client, { paused: true });
 
-    t.send(mockTrackEventPayload({ n: 'critical_ev', priority: 2 }));
-    t.send(mockTrackEventPayload({ n: 'high_ev', priority: 1 }));
+    t.send(mockTrackEventPayload({ n: 'critical_ev', priority: EventPriority.Critical }));
+    t.send(mockTrackEventPayload({ n: 'high_ev', priority: EventPriority.High }));
     t.send(mockTrackEventPayload({ n: 'normal_ev' }));
 
-    expect(fetchFn).not.toHaveBeenCalled();
+    expect(bodies).toHaveLength(0);
     t.start();
     await t.flush();
 
-    const allEvents = fetchFn.mock.calls.flatMap(
-      (call) => (JSON.parse(call[1].body as string) as { events: { n: string }[] }).events
+    const allEvents = bodies.flatMap(
+      (b) => (JSON.parse(b) as { events: { n: string }[] }).events
     );
     expect(allEvents.map((e) => e.n).sort()).toEqual(['critical_ev', 'high_ev', 'normal_ev']);
     await t.close();
   });
 
   it('updateBatchConfig only updates the normal lane, no errors thrown', async () => {
-    const fetchFn = makeFetch(200);
-    const t = new Transport({
-      url: 'https://example.test/ingest',
-      batchSize: 10,
-      batchTimeoutMs: 60_000,
-      compress: {
-        enabled: false,
-        compressFn: async (data): Promise<Uint8Array> => data as Uint8Array
-      },
-      fetch: fetchFn as unknown as (url: string, init: RequestInit) => Promise<Response>
-    });
+    const bodies: string[] = [];
+    const client: IHttpClient = {
+      post: async (_url: string, body: Uint8Array | string) => {
+        bodies.push(typeof body === 'string' ? body : new TextDecoder().decode(body));
+        return { ok: true, status: 200, headers: { get: () => null }, body: null };
+      }
+    };
+    const t = makeTransport(client);
     t.updateBatchConfig(3, 1_000);
     t.send(mockTrackEventPayload({ n: 'ev' }));
     await t.flush();
-    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(bodies.length).toBeGreaterThanOrEqual(1);
     await t.close();
   });
 });

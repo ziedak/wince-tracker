@@ -148,7 +148,13 @@ export class BatchQueue<T> {
       }
 
       const batch = this._buffer.slice(0, batchSize);
-      await this._sendFn(batch);
+      try {
+        await this._sendFn(batch);
+      } catch {
+        // Send failed — break out of the loop to avoid infinite retries.
+        // Items remain in the buffer for the next flush cycle.
+        break;
+      }
       this._buffer = this._buffer.slice(batchSize);
       this._bufferBytes -= batch.reduce((acc, item) => acc + this._sizeOf(item), 0);
       sent += batchSize;

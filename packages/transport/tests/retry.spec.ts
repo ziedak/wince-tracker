@@ -12,12 +12,15 @@ describe('withRetries', () => {
   it('retries until success', async () => {
     let calls = 0;
     const res = await withRetries(
+      {
+        maxAttempts: 4,
+        delayOpts: { baseDelayMs: 0, maxDelayMs: 0, factor: 2, jitter: false }
+      },
       async () => {
         calls++;
         if (calls < 3) throw new Error('fail');
         return 'ok';
-      },
-      4,
+      }
     );
     expect(res).toBe('ok');
     expect(calls).toBe(3);

@@ -1,4 +1,4 @@
-import { BatchQueue } from '../src/lib/batchQueue.js';
+import { BatchQueue, DEFAULT_BATCH_QUEUE_OPTS } from '../src/lib/batchQueue.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -6,12 +6,15 @@ import { BatchQueue } from '../src/lib/batchQueue.js';
 
 function makeQueue(
   sendFn: (batch: number[]) => Promise<void>,
-  opts: { batchSize?: number; flushIntervalMs?: number; maxBufferSize?: number } = {},
+  opts: { batchSize?: number; batchBytes?: number; flushIntervalMs?: number; maxBufferSize?: number } = {}
 ) {
-  return new BatchQueue<number>(sendFn, {
-    batchSize:       opts.batchSize       ?? 5,
+  return new BatchQueue<number>({
+    ...DEFAULT_BATCH_QUEUE_OPTS as Required<typeof DEFAULT_BATCH_QUEUE_OPTS>,
+    sendFn,
+    batchSize: opts.batchSize ?? 5,
+    batchBytes: opts.batchBytes ?? 15 * 1024,
     flushIntervalMs: opts.flushIntervalMs ?? 50_000,
-    maxBufferSize:   opts.maxBufferSize   ?? 100,
+    maxBufferSize: opts.maxBufferSize ?? 100,
   });
 }
 
