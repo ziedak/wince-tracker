@@ -14,6 +14,11 @@ export interface TokenBucketOptions {
   /** How often (ms) tokens are refilled. */
   refillIntervalMs: number;
 }
+export const DEFAULT_TOKEN_BUCKET_OPTIONS: TokenBucketOptions = {
+  bucketSize: 10,
+  refillRate: 10,
+  refillIntervalMs: 1_000
+};
 
 export class TokenBucketRateLimiter {
   private readonly _bucketSize:      number;

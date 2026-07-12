@@ -35,6 +35,7 @@ function mockTrackEventPayload(event: Partial<TrackEventPayload>): TrackEventPay
     ts: 0,
     sid: '',
     anon: '',
+    priority: 0,
     ...event
   };
 }
@@ -52,7 +53,8 @@ describe('Transport — send / flush', () => {
       seq: 0,
       ts: 0,
       sid: '',
-      anon: ''
+      anon: '',
+      priority: 0
     });
     t.send({
       n: 'click',
@@ -60,7 +62,8 @@ describe('Transport — send / flush', () => {
       seq: 0,
       ts: 0,
       sid: '',
-      anon: ''
+      anon: '',
+      priority: 0
     });
     await t.flush();
     expect(fetchFn).toHaveBeenCalledTimes(1);
@@ -308,8 +311,8 @@ describe('Transport — priority routing', () => {
       fetch: fetchFn as unknown as (url: string, init: RequestInit) => Promise<Response>
     });
 
-    t.send(mockTrackEventPayload({ n: 'critical_ev', _priority: 'critical' }));
-    t.send(mockTrackEventPayload({ n: 'normal_ev' }));
+    t.send(mockTrackEventPayload({ n: 'critical_ev', priority: 2 }));
+    t.send(mockTrackEventPayload({ n: 'normal_ev', priority: 0 }));
 
     await t.flush();
 
@@ -331,9 +334,9 @@ describe('Transport — priority routing', () => {
       fetch: fetchFn as unknown as (url: string, init: RequestInit) => Promise<Response>
     });
 
-    t.send(mockTrackEventPayload({ n: 'high_ev', _priority: 'high' }));
-    t.send(mockTrackEventPayload({ n: 'normal_ev' }));
-    t.send(mockTrackEventPayload({ n: 'critical_ev', _priority: 'critical' }));
+    t.send(mockTrackEventPayload({ n: 'high_ev', priority: 1 }));
+    t.send(mockTrackEventPayload({ n: 'normal_ev', priority: 0 }));
+    t.send(mockTrackEventPayload({ n: 'critical_ev', priority: 2 }));
 
     await t.flush();
 
@@ -361,12 +364,15 @@ describe('Transport — priority routing', () => {
       url: 'https://example.test/ingest',
       fetch: makeFetch() as unknown as (u: string, i: RequestInit) => Promise<Response>,
       paused: true,
-      compress: { enabled: false, compressFn: async (data): Promise<Uint8Array> => data as Uint8Array }
+      compress: {
+        enabled: false,
+        compressFn: async (data): Promise<Uint8Array> => data as Uint8Array
+      }
     });
 
-    t.send(mockTrackEventPayload({ n: 'normal_ev' }));
-    t.send(mockTrackEventPayload({ n: 'high_ev', _priority: 'high' }));
-    t.send(mockTrackEventPayload({ n: 'critical_ev', _priority: 'critical' }));
+    t.send(mockTrackEventPayload({ n: 'normal_ev', priority: 0 }));
+    t.send(mockTrackEventPayload({ n: 'high_ev', priority: 1 }));
+    t.send(mockTrackEventPayload({ n: 'critical_ev', priority: 2 }));
     t.drain();
 
     expect(beaconCount.value).toBe(3);
@@ -381,8 +387,8 @@ describe('Transport — priority routing', () => {
       paused: true
     });
     t.send(mockTrackEventPayload({ n: 'a' }));
-    t.send(mockTrackEventPayload({ n: 'b', _priority: 'high' }));
-    t.send(mockTrackEventPayload({ n: 'c', _priority: 'critical' }));
+    t.send(mockTrackEventPayload({ n: 'b', priority: 1 }));
+    t.send(mockTrackEventPayload({ n: 'c', priority: 2 }));
     expect(t.queueSize).toBe(3);
   });
 
@@ -395,8 +401,8 @@ describe('Transport — priority routing', () => {
       paused: true
     });
 
-    t.send(mockTrackEventPayload({ n: 'critical_ev', _priority: 'critical' }));
-    t.send(mockTrackEventPayload({ n: 'high_ev', _priority: 'high' }));
+    t.send(mockTrackEventPayload({ n: 'critical_ev', priority: 2 }));
+    t.send(mockTrackEventPayload({ n: 'high_ev', priority: 1 }));
     t.send(mockTrackEventPayload({ n: 'normal_ev' }));
 
     expect(fetchFn).not.toHaveBeenCalled();
@@ -416,7 +422,10 @@ describe('Transport — priority routing', () => {
       url: 'https://example.test/ingest',
       batchSize: 10,
       batchTimeoutMs: 60_000,
-      compress: { enabled: false, compressFn: async (data): Promise<Uint8Array> => data as Uint8Array },
+      compress: {
+        enabled: false,
+        compressFn: async (data): Promise<Uint8Array> => data as Uint8Array
+      },
       fetch: fetchFn as unknown as (url: string, init: RequestInit) => Promise<Response>
     });
     t.updateBatchConfig(3, 1_000);

@@ -1,175 +1,166 @@
-import { BatchQueue } from './batchQueue';
+import { serialize } from '@wince/utils';
+import { approximateBytes, BatchQueue, BatchQueueOptions } from './batchQueue';
 import { type HttpSender } from './httpSender';
 import { TokenBucketRateLimiter, type TokenBucketOptions } from './rateLimiter';
-import { backoffDelay } from './retry';
+import { backoffDelay, WithRetriesOptions } from './retry';
 import { safeSetTimeout } from './safeSetTimeout';
-import type { DropReason } from './types';
+import { TrackEventPayload } from '@wince/types';
+// import type { DropReason } from './types';
+
+// export const DEFAULT_EXPORTER_OPTIONS: Partial<ExporterOptions<unknown>> = {
+//   retry: DEFAULT_RETRY_OPTIONS,
+//   rateLimit: DEFAULT_TOKEN_BUCKET_OPTIONS,
+//   batch: DEFAULT_BATCH_QUEUE_OPTS
+// };
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export interface ExporterRetryOptions {
-  /** Total attempts including the first. Default: 4 */
-  attempts?: number;
-  baseDelayMs?: number;
-  maxDelayMs?:  number;
-  factor?:      number;
-  jitter?:      boolean;
-}
-
 export interface ExporterOptions<T> {
-  /**
-   * Serialise a batch of items into the HTTP request body.
-   * May be async — useful for compression (e.g. gzip) before sending.
-   */
-  encode: (batch: T[]) => string | Uint8Array | Promise<string | Uint8Array>;
-
-  /** Pre-built HttpSender (owns endpoint, headers, timeout, fetch). */
-  sender: HttpSender;
-
+  schemaVersion: number;
   /** Max items per HTTP request. Default: 100 */
-  batchSize?: number;
+  // batchSize?: number;
 
   /**
    * Max encoded bytes per HTTP request.
    * The Exporter will use the smaller of `batchSize` and `batchBytes` constraints.
    * Default: unlimited.
    */
-  batchBytes?: number;
+  // batchBytes?: number;
 
   /** Flush interval (ms). Backed off by circuit breaker. Default: 5 000 */
-  flushIntervalMs?: number;
+  // flushIntervalMs?: number;
 
   /** Max items held in memory. Oldest is dropped when full. Default: 500 */
-  maxBufferSize?: number;
+  // maxBufferSize?: number;
 
   /** Retry behaviour for transient errors. Default: 4 attempts, exp backoff + jitter. */
-  retry?: ExporterRetryOptions;
+  retry: WithRetriesOptions;
 
   /** Optional token-bucket rate limit applied before each item is enqueued. */
-  rateLimit?: TokenBucketOptions;
+  rateLimit: TokenBucketOptions;
+  batch: BatchQueueOptions<T>;
+  /**
+   * Serialise a batch of items into the HTTP request body.
+   * May be async — useful for compression (e.g. gzip) before sending.
+   */
+
+  compressFn: (input: string | ArrayBuffer | Uint8Array<ArrayBufferLike>) => Promise<Uint8Array>;
 
   /**
    * If provided, matching items bypass the batch buffer and are sent immediately
    * as a single-item HTTP request. Use for ERROR/FATAL priority flushing.
    */
-  onPriorityItem?: (item: T) => boolean;
+  // onPriorityItem?: (item: T) => boolean;
 
   /**
    * Optional byte-size estimator for a single item.
    * Required for accurate `batchBytes` enforcement; falls back to JSON.stringify length.
    */
-  sizeOf?: (item: T) => number;
+  // sizeOf?: (item: T) => number;
   /** Called when an event is lost or blocked from delivery. */
-  onDropped?: (reason: DropReason, item?: T) => void;
+  // onDropped?: (reason: DropReason, item?: T) => void;
   /** Called after a batch is successfully delivered. */
-  onBatchDelivered?: (items: T[]) => void;
+  onBatchDelivered: (eids: string[]) => void;
   /**
    * Priority scorer for drain-time sorting.
    * Higher scores are packed into beacons first. Items with equal scores
    * maintain their original buffer order. Omit to keep insertion order.
    */
-  priorityFn?: (item: T) => number;
+  // priorityFn?: (item: T) => number;
 }
 
 // ============================================================================
 // Circuit breaker state
 // ============================================================================
 
-const CB_THRESHOLD   = 3;    // consecutive failures before backing off
-const CB_MAX_FACTOR  = 10;   // max multiplier on flushIntervalMs
+const CB_THRESHOLD = 3; // consecutive failures before backing off
+const CB_MAX_FACTOR = 10; // max multiplier on flushIntervalMs
 
 // ============================================================================
 // Beacon packing constants
 // ============================================================================
 
 /** Conservative byte budget per beacon pass — stays below the 64 KB sendBeacon limit. */
-const BEACON_BYTE_BUDGET          = 60_000;
+const BEACON_BYTE_BUDGET = 60_000;
 /** Estimated envelope overhead: `{"sent_at":1234567890123,"events":[]}` */
 const BEACON_BYTE_BUDGET_OVERHEAD = 50;
-
-function approximateBytes<T>(item: T): number {
-  try { return JSON.stringify(item).length; } catch { return 0; }
-}
 
 // ============================================================================
 // Exporter
 // ============================================================================
 
-export class Exporter<T> {
-  private readonly _encode:          (batch: T[]) => string | Uint8Array | Promise<string | Uint8Array>;
-  private readonly _sender:          HttpSender;
-  private readonly _baseFlushMs:     number;
-  private readonly _retryOpts:       Required<ExporterRetryOptions>;
-  private readonly _rateLimiter?:    TokenBucketRateLimiter;
-  private readonly _queue:           BatchQueue<T>;
-  private readonly _onDropped?:         (reason: DropReason, item?: T) => void;
-  private readonly _onBatchDelivered?:  (items: T[]) => void;
-  private readonly _priorityFn?:        (item: T) => number;
+export class Exporter<T extends TrackEventPayload> {
+  /** Pre-built HttpSender (owns endpoint, headers, timeout, fetch). */
+
+  private readonly _sender: HttpSender;
+  private readonly _baseFlushMs: number;
+  private readonly _retryOpts: WithRetriesOptions;
+  private readonly _rateLimiter?: TokenBucketRateLimiter;
+  private readonly _queue: BatchQueue<T>;
+
+  private readonly _onBatchDelivered: (eids: string[]) => void;
+  // private readonly _onDropped?: (reason: DropReason, item?: T) => void;
+
+  // private readonly _priorityFn?: (item: T) => number;
 
   // Circuit breaker
   private _consecutiveFailures = 0;
-  private _cbOpen             = false;
+  private _cbOpen = false;
   private _cbTimer?: ReturnType<typeof setTimeout>;
 
   // Velocity-adaptive batch config
-  private _extBatchSize:   number;   // batch size set by external callers (network quality)
-  private _extFlushMs:     number;   // flush interval set by external callers
-  private _lastEnqueueAt  = 0;       // ms timestamp of the most recent enqueue
-  private _eventVelocity  = 0;       // EMA of events/second (α = 0.2)
-  private _velTier: 0 | 1 | 2 = 0;  // 0 = base, 1 = medium (1–5 /s), 2 = fast (> 5 /s)
+  private _extBatchSize: number; // batch size set by external callers (network quality)
+  private _extFlushMs: number; // flush interval set by external callers
+  private _lastEnqueueAt = 0; // ms timestamp of the most recent enqueue
+  private _eventVelocity = 0; // EMA of events/second (α = 0.2)
+  private _velTier: 0 | 1 | 2 = 0; // 0 = base, 1 = medium (1–5 /s), 2 = fast (> 5 /s)
+  private _compressFn: (
+    input: string | ArrayBuffer | Uint8Array<ArrayBufferLike>
+  ) => Promise<Uint8Array>;
+  private readonly _schemaVersion: number;
 
-  constructor(opts: ExporterOptions<T>) {
-    this._encode      = opts.encode;
-    this._sender      = opts.sender;
-    this._baseFlushMs = opts.flushIntervalMs ?? 5_000;
+  constructor(sender: HttpSender, opts: ExporterOptions<T>) {
+    this._sender = sender;
+    this._baseFlushMs = opts.batch.flushIntervalMs ?? 5_000;
+    this._retryOpts = opts.retry;
+    this._schemaVersion = opts.schemaVersion;
 
-    this._retryOpts = {
-      attempts:   opts.retry?.attempts   ?? 4,
-      baseDelayMs: opts.retry?.baseDelayMs ?? 200,
-      maxDelayMs:  opts.retry?.maxDelayMs  ?? 30_000,
-      factor:      opts.retry?.factor      ?? 2,
-      jitter:      opts.retry?.jitter      ?? true,
-    };
-
-    this._onDropped         = opts.onDropped;
-    this._onBatchDelivered  = opts.onBatchDelivered;
-    this._priorityFn        = opts.priorityFn;
+    //this._onDropped = opts.onDropped;
+    this._onBatchDelivered = opts.onBatchDelivered;
+    this._compressFn = opts.compressFn;
 
     if (opts.rateLimit) {
       this._rateLimiter = new TokenBucketRateLimiter(opts.rateLimit);
     }
 
-    this._queue = new BatchQueue<T>(
-      (batch) => this._sendBatch(batch),
-      {
-        batchSize:       opts.batchSize     ?? 100,
-        batchBytes:      opts.batchBytes,
-        flushIntervalMs: this._baseFlushMs,
-        maxBufferSize:   opts.maxBufferSize  ?? 500,
-        onPriorityItem:  opts.onPriorityItem,
-        sizeOf:          opts.sizeOf,
-        onDropped:       this._onDropped,
-      },
-    );
+    const batchOpts: BatchQueueOptions<T> = {
+      ...opts.batch,
+      sendFn: (batch) => this._sendBatch(batch)
+    };
+    this._queue = new BatchQueue<T>(batchOpts);
 
     // Seed external baseline so velocity tier 0 restores the right values.
-    this._extBatchSize = opts.batchSize ?? 100;
-    this._extFlushMs   = this._baseFlushMs;
+    this._extBatchSize = batchOpts.batchSize ?? 100;
+    this._extFlushMs = batchOpts.flushIntervalMs ?? 5_000;
   }
 
   enqueue(item: T): void {
     if (this._rateLimiter && !this._rateLimiter.consume()) {
-      this._onDropped?.('rate_limit', item);
+      this._queue.onDropped('rate_limit', item);
       return; // rate-limited, drop
     }
     this._trackVelocity();
     this._queue.add(item);
   }
 
-  get queueSize(): number   { return this._queue.size; }
-  get circuitOpen(): boolean { return this._cbOpen; }
+  get queueSize(): number {
+    return this._queue.size;
+  }
+  get circuitOpen(): boolean {
+    return this._cbOpen;
+  }
 
   /** Pause automatic flushing (e.g. consent not yet granted, or user offline). */
   pause(): void {
@@ -188,7 +179,7 @@ export class Exporter<T> {
    */
   updateBatchConfig(batchSize: number, flushIntervalMs: number): void {
     this._extBatchSize = batchSize;
-    this._extFlushMs   = flushIntervalMs;
+    this._extFlushMs = flushIntervalMs;
     if (this._velTier === 0) {
       this._queue.updateConfig(batchSize, flushIntervalMs);
     }
@@ -201,7 +192,9 @@ export class Exporter<T> {
   async close(): Promise<void> {
     this._clearCbTimer();
     this._queue.close();
-    await this._queue.flush().catch(() => { /* best-effort on shutdown */ });
+    await this._queue.flush().catch(() => {
+      /* best-effort on shutdown */
+    });
   }
 
   /**
@@ -216,21 +209,22 @@ export class Exporter<T> {
    * @param opts.encodeSync  - Synchronous encoder (e.g. JSON.stringify or compressSync)
    * @param opts.send        - Fire-and-forget sender (e.g. navigator.sendBeacon wrapper)
    */
-  drain(opts: {
-    encodeSync: (batch: T[]) => string | Uint8Array;
-    send: (data: string | Uint8Array) => void;
-  }): void {
-    let items = this._queue.drain();
+  drain(
+    url: string,
+    // batch: T[]
+    //encodeSync: (batch: T[]) => string | Uint8Array;
+  ): void {
+    const items = this._queue.drain();
     if (items.length === 0) return;
 
-    if (this._priorityFn) {
-      const fn = this._priorityFn;
-      // Stable sort: items with equal priority keep their original order.
-      items = items
-        .map((item, i) => ({ item, pri: fn(item), i }))
-        .sort((a, b) => b.pri - a.pri || a.i - b.i)
-        .map(({ item }) => item);
-    }
+    // if (this._priorityFn) {
+    //   const fn = this._priorityFn;
+    //   // Stable sort: items with equal priority keep their original order.
+    //   items = items
+    //     .map((item, i) => ({ item, pri: fn(item), i }))
+    //     .sort((a, b) => b.pri - a.pri || a.i - b.i)
+    //     .map(({ item }) => item);
+    // }
 
     // Greedy packing — at most two beacon passes.
     let remaining = items;
@@ -246,9 +240,11 @@ export class Exporter<T> {
       }
 
       try {
-        const body = opts.encodeSync(batch);
-        opts.send(body);
-      } catch { /* best-effort — beacon is fire-and-forget */ }
+        const body = this._buildEnvelope(batch);
+        this._sendImmediate(url, body);
+      } catch {
+        /* best-effort — beacon is fire-and-forget */
+      }
 
       remaining = remaining.slice(batch.length);
     }
@@ -265,12 +261,12 @@ export class Exporter<T> {
 
     let currentBatch = batch;
     let attempt = 0;
-    const { attempts, baseDelayMs, maxDelayMs, factor, jitter } = this._retryOpts;
+    const { baseDelayMs, maxDelayMs, factor, jitter } = this._retryOpts.delayOpts;
 
     // Cache the encoded body; invalidated only when `currentBatch` is replaced (too-large halving).
     let body: string | Uint8Array | undefined;
 
-    while (attempt < attempts) {
+    while (attempt < this._retryOpts.maxAttempts) {
       if (body === undefined) {
         body = await this._encode(currentBatch);
       }
@@ -279,14 +275,14 @@ export class Exporter<T> {
       switch (outcome.kind) {
         case 'ok':
           this._onSuccess();
-          this._onBatchDelivered?.(currentBatch);
+          this._batchDelivered(currentBatch);
           return;
 
         case 'too-large':
           if (currentBatch.length === 1) {
             // Single oversized record — drop to avoid infinite loop
             console.warn('[Exporter] dropping oversized single record (too-large)');
-            this._onDropped?.('too_large', currentBatch[0]);
+            this._queue.onDropped('too_large', currentBatch[0]);
             this._onSuccess(); // treat as consumed
             return;
           }
@@ -303,14 +299,15 @@ export class Exporter<T> {
 
         case 'retry': {
           attempt++;
-          if (attempt >= attempts) {
+          if (attempt >= this._retryOpts.maxAttempts) {
             this._onFailure(); // count once per complete batch exhaustion, not per attempt
             break;
           }
 
-          const delay = outcome.retryAfterMs != null
-            ? outcome.retryAfterMs
-            : backoffDelay(attempt - 1, { baseDelayMs, maxDelayMs, factor, jitter });
+          const delay =
+            outcome.retryAfterMs != null
+              ? outcome.retryAfterMs
+              : backoffDelay(attempt - 1, { baseDelayMs, maxDelayMs, factor, jitter });
 
           await new Promise<void>((res) => safeSetTimeout(res, delay));
           continue;
@@ -320,6 +317,29 @@ export class Exporter<T> {
 
     // Exhausted retries — throw so BatchQueue retains items in its buffer for the next cycle.
     throw new Error('[Exporter] send failed after maximum retry attempts');
+  }
+
+  private _buildEnvelope(batch: TrackEventPayload[]): string {
+    const sent_at = Date.now();
+    const events = batch.map((e) => {
+      const ts = e.ts ? e.ts : sent_at;
+      return { ...e, offset: sent_at - ts, schema_v: this._schemaVersion };
+    });
+    return serialize({ sent_at, events });
+  }
+
+  private async _encode(currentBatch: T[]): Promise<string | Uint8Array<ArrayBufferLike>> {
+    const payload = this._buildEnvelope(currentBatch);
+    return this._compressFn ? await this._compressFn(payload) : payload;
+  }
+
+  private _sendImmediate(url: string, data: string | Uint8Array) {
+    const type = typeof data === 'string' ? 'application/json' : 'application/octet-stream';
+    (
+      navigator as Navigator & {
+        sendBeacon: (u: string, b: Blob) => boolean;
+      }
+    ).sendBeacon(url, new Blob([data as BlobPart], { type }));
   }
 
   // --------------------------------------------------------------------------
@@ -353,14 +373,16 @@ export class Exporter<T> {
     // +1 so the first trigger (consecutiveFailures === CB_THRESHOLD) starts at 2× base, not 1×.
     const exponent = Math.min(
       this._consecutiveFailures - CB_THRESHOLD + 1,
-      Math.log2(CB_MAX_FACTOR),
+      Math.log2(CB_MAX_FACTOR)
     );
     // exponent is capped at log2(CB_MAX_FACTOR), so 2^exponent ≤ CB_MAX_FACTOR — outer min redundant.
     const backoffMs = this._baseFlushMs * Math.pow(2, exponent);
     this._cbTimer = safeSetTimeout(() => {
       this._cbTimer = undefined;
       this._cbOpen = false; // close circuit — allow one probe flush through
-      void this._queue.flush().catch((error) => { void error; });
+      void this._queue.flush().catch((error) => {
+        void error;
+      });
     }, backoffMs);
   }
 
@@ -395,9 +417,16 @@ export class Exporter<T> {
     this._velTier = tier;
 
     const [bs, fi] =
-      tier === 2 ? [Math.min(this._extBatchSize, 5),    500] :
-      tier === 1 ? [Math.min(this._extBatchSize, 10), 1_000] :
-      [this._extBatchSize, this._extFlushMs];
+      tier === 2
+        ? [Math.min(this._extBatchSize, 5), 500]
+        : tier === 1
+          ? [Math.min(this._extBatchSize, 10), 1_000]
+          : [this._extBatchSize, this._extFlushMs];
     this._queue.updateConfig(bs, fi);
+  }
+
+  private _batchDelivered(batch: T[]): void {
+    const eids = batch.map((e) => (e.eid ? e.eid : null)).filter((id): id is string => id !== null);
+    if (eids.length > 0) this._onBatchDelivered(eids);
   }
 }

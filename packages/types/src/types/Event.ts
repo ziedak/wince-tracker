@@ -1,4 +1,3 @@
-
 // ============================================================================
 // Core event types
 // ============================================================================
@@ -55,10 +54,17 @@ export interface TrackEventPayload {
   /** Schema version, set by Transport at encode time. Used for IDB migration. */
   schema_v?: number;
   /** Delivery priority for the event. */
-  _priority?: EventPriority;
+  priority: EventPriority;
   /** Allow arbitrary extra fields for forward-compat / custom enrichment. */
   //[key: string]: unknown;
 }
 
 /** Delivery priority for an event. */
-export type EventPriority = 'critical' | 'high' | 'normal';
+export enum EventPriority {
+  /** Critical events are sent immediately, one per flush, and never dropped. */
+  Critical = 2,
+  /** High-priority events are sent in small batches and may be dropped under load. */
+  High = 1,
+  /** Normal events are sent in larger batches and may be dropped under load. */
+  Normal = 0
+}

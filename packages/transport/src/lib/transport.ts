@@ -1,123 +1,72 @@
 // import { compressSync } from '@wince/types';
 import { Exporter } from './exporter';
 import { HttpSender } from './httpSender';
-import type { TransportOptions } from './types';
-import type { compressAsync } from '@wince/types';
-import { BeaconClient } from './beaconClient';
-import { HttpClient } from './HttpClient';
-import { TrackEventPayload } from '@wince/types';
-import { compressAsync as gzipCompressAsync } from '@wince/compress';
+import { DEFAULT_TRANSPORT_OPTIONS, type TransportOptions } from './types';
+import { BeaconClient } from './clients/beaconClient';
+import { EventPriority, TrackEventPayload } from '@wince/types';
+import { HttpClient } from './clients/HttpClient';
+import { WebSocketClient } from './clients/WebSocketClient';
+import { IHttpClient } from './clients/IHttpClient';
 
-const SCHEMA_VERSION = 1;
-
-function buildEnvelope(batch: TrackEventPayload[]): string {
-  const sent_at = Date.now();
-  const events = batch.map((e) => {
-    const ts = e.ts ? (e['ts'] as number) : sent_at;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { _priority, ...rest } = e as TrackEventPayload & {
-      _priority?: unknown;
-    };
-    return { ...rest, offset: sent_at - ts, schema_v: SCHEMA_VERSION };
-  });
-  return JSON.stringify({ sent_at, events });
+export interface ITransport {
+  queueSize: number;
+  circuitOpen: boolean;
+  send(event: TrackEventPayload): void;
+  start(): void;
+  pause(): void;
+  updateBatchConfig(batchSize: number, batchTimeoutMs: number): void;
+  drain(): void;
+  flush(): Promise<void>;
+  close(): Promise<void>;
 }
 
-export class Transport {
-  private readonly _critical: Exporter<TrackEventPayload>;
-  private readonly _high: Exporter<TrackEventPayload>;
-  private readonly _normal: Exporter<TrackEventPayload>;
+export class Transport<T extends TrackEventPayload> implements ITransport {
+  private readonly _critical: Exporter<T>;
+  private readonly _high: Exporter<T>;
+  private readonly _normal: Exporter<T>;
   private readonly _url: string;
+  // private readonly _wsUrl: string;
+  // private readonly _requestTimeoutMs: number;
   private readonly _useCompression: boolean;
 
-  constructor(opts: TransportOptions) {
+  constructor(client: IHttpClient, opts: TransportOptions<T>) {
     this._url = opts.url;
-    
-    // Normalize compress option to always be an object
-    const compressEnabled = opts.compress === undefined ? true : 
-                           typeof opts.compress === 'boolean' ? opts.compress : 
-                           opts.compress.enabled;
-    this._useCompression = compressEnabled;
+    // this._wsUrl = opts.wsUrl;
+    // this._requestTimeoutMs = opts.requestTimeoutMs;
 
-    const headers: Record<string, string> = { ...opts.headers };
-    if (this._useCompression) headers['Content-Encoding'] = 'gzip';
+    this._useCompression = opts.compress.enabled;
 
-    const sender = new HttpSender({
+    let headers: HeadersInit = opts.headers;
+    if (this._useCompression) headers = { 'Content-Encoding': 'gzip', ...opts.headers };
+
+    const sender = new HttpSender(client, {
       endpoint: opts.url,
       headers,
-      requestTimeoutMs: opts.requestTimeoutMs,
-      fetch: opts.fetch
+      requestTimeoutMs: opts.requestTimeoutMs
     });
 
-    const isCompressObject = (c: boolean | { enabled: boolean; compressFn: compressAsync } | undefined): c is { enabled: boolean; compressFn: compressAsync } => {
-      return typeof c === 'object' && c !== null;
-    };
-
-    const encode = async (batch: TrackEventPayload[]) => {
-      const payload = buildEnvelope(batch);
-      const compressObj = isCompressObject(opts.compress) ? opts.compress : { enabled: compressEnabled, compressFn: gzipCompressAsync };
-      return this._useCompression ? await compressObj.compressFn(payload) : payload;
-    };
-
-    const retryOpts = {
-      attempts: opts.retry?.attempts,
-      baseDelayMs: opts.retry?.baseDelayMs,
-      maxDelayMs: opts.retry?.maxDelayMs,
-      factor: opts.retry?.factor,
-      jitter: opts.retry?.jitter
-    };
-
-    const onDropped = opts.onDropped;
-    const onBatchDelivered = opts.onBatchDelivered
-      ? (items: TrackEventPayload[]) => {
-          const eids = items
-            .map((e) => (typeof e['eid'] === 'string' ? (e['eid'] as string) : null))
-            .filter((id): id is string => id !== null);
-          if (eids.length > 0) opts.onBatchDelivered?.(eids);
-        }
-      : undefined;
+    // const onBatchDelivered = opts.onBatchDelivered
+    //   ? (items: TrackEventPayload[]) => {
+    //       const eids = items
+    //         .map((e) => (e.eid ? e.eid : null))
+    //         .filter((id): id is string => id !== null);
+    //       if (eids.length > 0) opts.onBatchDelivered(eids);
+    //     }
+    //   : undefined;
 
     // ── Critical lane: one event per flush, no hold time. ──────────────────
     // Events with priority='critical' (exit_intent, rage_click, etc.) are
     // sent immediately on enqueue — never batched. Rate-limited to a burst of
     // 10 to prevent storms (e.g. 50 rage-clicks firing 50 requests).
-    this._critical = new Exporter<TrackEventPayload>({
-      sender,
-      encode,
-      batchSize: 1,
-      flushIntervalMs: 0,
-      maxBufferSize: 50,
-      rateLimit: { bucketSize: 10, refillRate: 10, refillIntervalMs: 1_000 },
-      retry: retryOpts,
-      onDropped,
-      onBatchDelivered
-    });
+    this._critical = new Exporter<T>(sender, opts.exporterOpts.critical);
 
     // ── High lane: small batches, 2 s flush. ───────────────────────────────
     // purchase, form_abandon, cart add/remove — important but not unload-critical.
-    this._high = new Exporter<TrackEventPayload>({
-      sender,
-      encode,
-      batchSize: 5,
-      flushIntervalMs: 2_000,
-      maxBufferSize: 200,
-      retry: retryOpts,
-      onDropped,
-      onBatchDelivered
-    });
+    this._high = new Exporter<T>(sender, opts.exporterOpts.high);
 
     // ── Normal lane: configured batch size + interval. ─────────────────────
     // All other events — scroll depth, clicks, page_view, etc.
-    this._normal = new Exporter<TrackEventPayload>({
-      sender,
-      encode,
-      batchSize: opts.batchSize ?? 10,
-      flushIntervalMs: opts.batchTimeoutMs ?? 5_000,
-      maxBufferSize: opts.maxBufferSize ?? 500,
-      retry: retryOpts,
-      onDropped,
-      onBatchDelivered
-    });
+    this._normal = new Exporter<T>(sender, opts.exporterOpts.normal);
 
     if (opts.paused) {
       this._critical.pause();
@@ -128,16 +77,16 @@ export class Transport {
 
   /**
    * Route an event to the appropriate priority lane.
-   * The `_priority` field (stamped by WinceClient) controls routing:
-   *   - `'critical'` → critical lane (immediate flush)
-   *   - `'high'`     → high lane (2 s flush)
-   *   - anything else → normal lane (configured flush interval)
+   * The `priority` field (stamped by WinceClient) controls routing:
+   *   - `EventPriority.Critical` → critical lane (immediate flush)
+   *   - `EventPriority.High`     → high lane (2 s flush)
+   *   - `EventPriority.Normal`   → normal lane (configured flush interval)
    */
-  send(event: TrackEventPayload): void {
-    const priority = event._priority;
-    if (priority === 'critical') {
+  send(event: T): void {
+    const priority = event.priority;
+    if (priority === EventPriority.Critical) {
       this._critical.enqueue(event);
-    } else if (priority === 'high') {
+    } else if (priority === EventPriority.High) {
       this._high.enqueue(event);
     } else {
       this._normal.enqueue(event);
@@ -202,22 +151,22 @@ export class Transport {
     }
 
     const url = this._url;
-    const drainOpts = {
-      encodeSync: (batch: TrackEventPayload[]) => buildEnvelope(batch),
-      send: (data: string | Uint8Array) => {
-        const type = typeof data === 'string' ? 'application/json' : 'application/octet-stream';
-        (
-          navigator as Navigator & {
-            sendBeacon: (u: string, b: Blob) => boolean;
-          }
-        ).sendBeacon(url, new Blob([data as BlobPart], { type }));
-      }
-    };
+    // const drainOpts = {
+    //   encodeSync: (batch: TrackEventPayload[]) => buildEnvelope(batch),
+    //   send: (data: string | Uint8Array) => {
+    //     const type = typeof data === 'string' ? 'application/json' : 'application/octet-stream';
+    //     (
+    //       navigator as Navigator & {
+    //         sendBeacon: (u: string, b: Blob) => boolean;
+    //       }
+    //     ).sendBeacon(url, new Blob([data as BlobPart], { type }));
+    //   }
+    // };
 
     // Priority order: critical → high → normal.
-    this._critical.drain(drainOpts);
-    this._high.drain(drainOpts);
-    this._normal.drain(drainOpts);
+    this._critical.drain(url);
+    this._high.drain(url);
+    this._normal.drain(url);
   }
 
   async flush(): Promise<void> {
@@ -235,32 +184,29 @@ export default Transport;
  * Create a default Transport instance for browser usage.
  * Uses BeaconClient with a Fetch fallback and enables compression by default.
  */
-export function createDefaultTransport(url: string, opts?: Partial<TransportOptions>) {
-  const client = new BeaconClient(new HttpClient());
-  const transport = new Transport({
-    url,
-    compress: opts?.compress ?? true,
-    client,
-    batchSize: opts?.batchSize,
-    batchTimeoutMs: opts?.batchTimeoutMs,
-    headers: opts?.headers,
-    retry: opts?.retry
-  } as TransportOptions);
-  return transport;
-}
 
-export function createClientTransport(opts: TransportOptions): Transport {
-  return new Transport({
-    url: opts.url,
-    compress: opts.compress ?? true,
-    batchSize: opts.batchSize ?? 20,
-    batchTimeoutMs: opts.batchTimeoutMs ?? 5_000,
-    maxBufferSize: opts.maxBufferSize ?? 500,
-    headers: opts.headers,
-    retry: opts.retry,
-    fetch: opts.fetch,
-    paused: opts.paused ?? true,
-    onDropped: opts.onDropped,
-    onBatchDelivered: opts.onBatchDelivered
-  });
+// export function createDefaultTransport(opts?: Partial<TransportOptions>) {
+//   // const client = new BeaconClient();
+//   const transportOpts: TransportOptions = { ...opts, ...DEFAULT_TRANSPORT_OPTIONS };
+//   transportOpts.client = new BeaconClient();
+//   const transport = new Transport(transportOpts);
+//   return transport;
+// }
+
+export function createClientTransport<T extends TrackEventPayload>(
+  opts: TransportOptions<T>
+): Transport<T> {
+  const beaconClient = new BeaconClient();
+  const httpClient = new HttpClient(opts.headers, beaconClient);
+  const webSocketClient = new WebSocketClient(
+    {
+      url: opts.wsUrl,
+      ackTimeoutMs: 5_000
+    },
+    httpClient
+  );
+  const transportOpts: TransportOptions<T> = { ...opts, ...DEFAULT_TRANSPORT_OPTIONS };
+
+  const transport = new Transport(webSocketClient, transportOpts);
+  return transport;
 }

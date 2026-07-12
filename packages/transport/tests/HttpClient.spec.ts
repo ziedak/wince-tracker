@@ -1,4 +1,4 @@
-import { HttpClient } from '../src/lib/HttpClient.js';
+import { HttpClient } from '../src/lib/clients/HttpClient.js';
 
 describe('HttpClient', () => {
   afterEach(() => {

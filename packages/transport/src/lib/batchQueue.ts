@@ -1,66 +1,86 @@
+import { serialize } from '@wince/utils';
 import { safeSetTimeout } from './safeSetTimeout';
 import type { DropReason } from './types';
 
 export interface BatchQueueOptions<T> {
-  /** Flush when buffer reaches this many items. Default: 20 */
-  batchSize?: number;
-  /** Flush when total encoded bytes would exceed this. Default: unlimited */
-  batchBytes?: number;
+  /** Flush when buffer reaches this many items. Default: 100 */
+  batchSize: number;
+  /** Flush when total encoded bytes would exceed this. Default: 15 KB  */
+  batchBytes: number;
   /** Periodic flush interval (ms). Default: 5000 */
-  flushIntervalMs?: number;
+  flushIntervalMs: number;
   /** Max items held in memory; oldest is dropped when full. Default: 500 */
-  maxBufferSize?: number;
+  maxBufferSize: number;
   /**
    * When provided, items matching this predicate bypass the batch buffer and
    * are passed to `sendFn` immediately as a single-item batch.
    * Used for ERROR/FATAL priority flushing.
    */
-  onPriorityItem?: (item: T) => boolean;
+  onPriorityItem: (item: T) => boolean;
+  sendFn: SendFn<T>;
   /**
    * Optional byte-size estimator for an item.
    * Required when `batchBytes` is set. Falls back to rough JSON.stringify length.
    */
-  sizeOf?: (item: T) => number;
+  sizeOf: (item: T) => number;
   /** Called when an item is evicted from the buffer because maxBufferSize was exceeded. */
-  onDropped?: (reason: DropReason, item: T) => void;
+  onDropped: (reason: DropReason, item: T) => void;
 }
 
 type SendFn<T> = (batch: T[]) => Promise<void>;
 
-function defaultSizeOf<T>(item: T): number {
-  try { return JSON.stringify(item).length; } catch { return 0; }
+export function approximateBytes<T>(item: T): number {
+  try {
+    return serialize(item).length;
+  } catch {
+    return 0;
+  }
 }
 
+export const DEFAULT_BATCH_QUEUE_OPTS: Required<BatchQueueOptions<unknown>> = {
+  batchSize: 10,
+  batchBytes: 15 * 1024, 
+  flushIntervalMs: 5000,
+  maxBufferSize: 500,
+  sendFn: async () => {
+    /* noop */
+  },
+  onPriorityItem: () => false,
+  sizeOf: approximateBytes,
+  onDropped: () => {
+    /* noop */
+  }
+};
 export class BatchQueue<T> {
-  private readonly _sendFn:          SendFn<T>;
-  private          _batchSize:       number;
-  private readonly _batchBytes:      number;
-  private          _flushIntervalMs: number;
-  private readonly _maxBufferSize:   number;
-  private readonly _onPriorityItem?: (item: T) => boolean;
-  private readonly _sizeOf:          (item: T) => number;
-  private readonly _onDropped?:      (reason: DropReason, item: T) => void;
+  private _batchSize: number;
+  private readonly _batchBytes: number;
+  private _flushIntervalMs: number;
+  private readonly _maxBufferSize: number;
+  private readonly _sendFn: SendFn<T>;
+  private readonly _onPriorityItem: (item: T) => boolean;
+  private readonly _sizeOf: (item: T) => number;
+  private readonly _onDropped: (reason: DropReason, item: T) => void;
 
-  private _buffer:       T[] = [];
-  private _bufferBytes   = 0;
-  private _flushTimer?:  ReturnType<typeof setTimeout>;
+  private _buffer: T[] = [];
+  private _bufferBytes = 0;
+  private _flushTimer?: ReturnType<typeof setTimeout>;
   private _flushPromise: Promise<void> | null = null;
-  private _paused        = false;
+  private _paused = false;
 
-  constructor(sendFn: SendFn<T>, opts: BatchQueueOptions<T> = {}) {
-    this._sendFn          = sendFn;
-    this._batchSize       = opts.batchSize       ?? 20;
-    this._batchBytes      = opts.batchBytes       ?? Infinity;
-    this._flushIntervalMs = opts.flushIntervalMs  ?? 5000;
-    this._maxBufferSize   = opts.maxBufferSize    ?? 500;
-    this._onPriorityItem  = opts.onPriorityItem;
-    this._sizeOf          = opts.sizeOf           ?? defaultSizeOf;
-    this._onDropped       = opts.onDropped;
+  constructor(opts: BatchQueueOptions<T>) {
+    this._batchSize = opts.batchSize;
+    this._batchBytes = opts.batchBytes;
+    this._flushIntervalMs = opts.flushIntervalMs;
+    this._maxBufferSize = opts.maxBufferSize;
+    this._sendFn = opts.sendFn;
+    this._onPriorityItem = opts.onPriorityItem;
+    this._sizeOf = opts.sizeOf;
+    this._onDropped = opts.onDropped;
   }
 
   add(item: T): void {
     // Priority items bypass the batch entirely
-    if (this._onPriorityItem?.(item)) {
+    if (this._onPriorityItem(item)) {
       void this._sendImmediate(item);
       return;
     }
@@ -70,7 +90,7 @@ export class BatchQueue<T> {
       const dropped = this._buffer.shift();
       if (dropped !== undefined) {
         this._bufferBytes -= this._sizeOf(dropped);
-        this._onDropped?.('buffer_full', dropped);
+        this._onDropped('buffer_full', dropped);
       }
     }
 
@@ -80,16 +100,15 @@ export class BatchQueue<T> {
     // While paused: buffer items but never auto-flush or arm the timer.
     if (this._paused) return;
 
-    if (
-      this._buffer.length >= this._batchSize ||
-      this._bufferBytes   >= this._batchBytes
-    ) {
+    if (this._buffer.length >= this._batchSize || this._bufferBytes >= this._batchBytes) {
       this._flushInBackground();
     } else {
       this._armTimer();
     }
   }
-
+  onPriorityItem(item: T): boolean {
+    return this._onPriorityItem(item);
+  }
   /**
    * Flush all buffered items. Concurrent calls are serialised — a second call
    * waits for the first to finish, then issues a second flush for anything that
@@ -140,7 +159,11 @@ export class BatchQueue<T> {
     try {
       await this._sendFn([item]);
     } catch (err) {
-      try { console.error('[BatchQueue] priority send failed', err); } catch { /* swallow */ }
+      try {
+        console.error('[BatchQueue] priority send failed', err);
+      } catch {
+        /* swallow */
+      }
     }
   }
 
@@ -161,10 +184,20 @@ export class BatchQueue<T> {
 
   private _flushInBackground(): void {
     void this.flush().catch((err) => {
-      try { console.error('[BatchQueue] flush error', err); } catch { /* swallow */ }
+      try {
+        console.error('[BatchQueue] flush error', err);
+      } catch {
+        /* swallow */
+      }
     });
   }
 
+  onDropped(reason: DropReason, item: T): void {
+    this._onDropped(reason, item);
+  }
+  // sizeof(item: T): number {
+  //   return this._sizeOf(item);
+  // }
   close(): void {
     this._clearTimer();
   }
@@ -194,7 +227,7 @@ export class BatchQueue<T> {
    * Takes effect on the next flush cycle; the current timer is rearmed immediately.
    */
   updateConfig(batchSize: number, flushIntervalMs: number): void {
-    this._batchSize       = batchSize;
+    this._batchSize = batchSize;
     this._flushIntervalMs = flushIntervalMs;
     // Rearm timer so the new interval takes effect without waiting for the old one.
     if (!this._paused && this._buffer.length > 0) {
@@ -214,5 +247,7 @@ export class BatchQueue<T> {
     return items;
   }
 
-  get size(): number { return this._buffer.length; }
+  get size(): number {
+    return this._buffer.length;
+  }
 }

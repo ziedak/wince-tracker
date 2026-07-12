@@ -1,53 +1,50 @@
 import { safeSetTimeout } from './safeSetTimeout';
 import { classifyStatus, type SendOutcome } from './sendOutcome';
+import type { IHttpClient } from './clients/IHttpClient';
 
 export interface HttpSenderOptions {
   /** OTLP/HTTP or batch endpoint URL */
   endpoint: string;
   /** Default headers merged with per-request headers */
-  headers?: Record<string, string>;
+  headers?: HeadersInit;
   /** Hard timeout per request (ms). Triggers AbortController. Default: 10 000 */
   requestTimeoutMs?: number;
-  /** Injectable fetch for testing */
-  fetch?: (url: string, init: RequestInit) => Promise<Response>;
 }
-
-type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
 
 export class HttpSender {
   private readonly _endpoint: string;
-  private readonly _headers: Record<string, string>;
+  private readonly _headers: HeadersInit;
   private readonly _requestTimeoutMs: number;
-  private readonly _fetchFn: FetchFn;
+  private readonly _client: IHttpClient;
 
-  constructor(opts: HttpSenderOptions) {
+  constructor(client: IHttpClient, opts: HttpSenderOptions) {
     this._endpoint = opts.endpoint;
     this._headers = { 'Content-Type': 'application/json', ...opts.headers };
     this._requestTimeoutMs = opts.requestTimeoutMs ?? 10_000;
-    this._fetchFn = opts.fetch ?? ((url, init) => globalThis.fetch(url, init));
+    this._client = client;
   }
 
   /**
    * Send a pre-serialised body. Never throws — always returns a SendOutcome.
    * The AbortController timeout uses safeSetTimeout so it doesn't keep Node.js alive.
    */
-  async send(
-    body: string | Uint8Array,
-    extraHeaders?: Record<string, string>
-  ): Promise<SendOutcome> {
+  async send(body: string | Uint8Array, extraHeaders?: HeadersInit): Promise<SendOutcome> {
     const ctrl = new AbortController();
     const timer = safeSetTimeout(() => ctrl.abort(), this._requestTimeoutMs);
 
-    let res: Response;
+    let res: {
+      ok: boolean;
+      status: number;
+      headers: { get(name: string): string | null };
+      body: { cancel(): Promise<void> } | null;
+    };
     try {
-      const bodySize = typeof body === 'string' ? body.length : body.byteLength;
-      res = await this._fetchFn(this._endpoint, {
-        method: 'POST',
-        headers: { ...this._headers, ...extraHeaders } as Record<string, string>,
-        body: body as BodyInit,
-        signal: ctrl.signal,
-        keepalive: bodySize < 51 * 1024
-      });
+      res = await this._client.post(
+        this._endpoint,
+        body,
+        { ...this._headers, ...extraHeaders },
+        ctrl.signal
+      );
     } catch {
       clearTimeout(timer);
       // Network error or AbortError (timeout) — treat as transient, keep records

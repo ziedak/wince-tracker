@@ -1,17 +1,29 @@
-export function backoffDelay(
-  attempt: number,
-  opts?: {
-    baseDelayMs?: number;
-    maxDelayMs?: number;
-    factor?: number;
-    jitter?: boolean;
-  },
-): number {
-  const base = opts?.baseDelayMs ?? 100;
-  const factor = opts?.factor ?? 2;
-  const max = opts?.maxDelayMs ?? 10000;
-  const jitter = opts?.jitter ?? true;
-  const delay = Math.min(max, Math.round(base * Math.pow(factor, attempt)));
+export type DropReason =
+  | 'consent' // consent not granted
+  | 'sampling' // sampler rejected the event
+  | 'rate_limit' // token bucket exhausted
+  | 'quota' // server 429 quota signal
+  | 'too_large' // single event exceeds server size limit
+  | 'buffer_full' // maxBufferSize exceeded — oldest event evicted
+  | 'client_dedup';
+
+export interface DelayOptions {
+  baseDelayMs: number;
+  maxDelayMs: number;
+  factor: number;
+  jitter: boolean;
+}
+
+export const DEFAULT_DELAY_OPTIONS: DelayOptions = {
+  baseDelayMs: 200,
+  maxDelayMs: 30_000,
+  factor: 2,
+  jitter: true
+};
+
+export function backoffDelay(attempt: number, delayOpts?: Partial<DelayOptions>): number {
+  const { baseDelayMs, factor, maxDelayMs, jitter } = { ...DEFAULT_DELAY_OPTIONS, ...delayOpts };
+  const delay = Math.min(maxDelayMs, Math.round(baseDelayMs * Math.pow(factor, attempt)));
   if (!jitter) return delay;
   const rand = Math.random();
   return Math.round(delay * (0.5 + rand / 2));
@@ -19,32 +31,30 @@ export function backoffDelay(
 
 export interface WithRetriesOptions {
   /** Number of total attempts (including the first). Default: 3 */
-  attempts?: number;
+  maxAttempts: number;
+  /** Backoff delay options. Default: { baseDelayMs: 200, maxDelayMs: 30000, factor: 2, jitter: true } */
+  delayOpts: DelayOptions;
   /** Return false to stop retrying immediately and rethrow. Default: always retry. */
   retryCheck?: (err: unknown) => boolean;
   /** Called after each failed attempt (useful for logging). */
   onAttempt?: (err: unknown, attempt: number) => void;
-  baseDelayMs?: number;
-  maxDelayMs?: number;
-  factor?: number;
-  jitter?: boolean;
 }
 
+export const DEFAULT_RETRY_OPTIONS: WithRetriesOptions = {
+  maxAttempts: 3,
+  delayOpts: DEFAULT_DELAY_OPTIONS
+};
 export async function withRetries<T>(
-  fn: () => Promise<T>,
-  attemptsOrOpts: number | WithRetriesOptions = 3,
-  onAttempt?: (err: unknown, attempt: number) => void,
-  delayOpts?: Parameters<typeof backoffDelay>[1],
+  attemptsOpts: WithRetriesOptions,
+  fn: () => Promise<T>
 ): Promise<T> {
-  // Accept both the legacy positional signature and the new options object.
-  const opts: WithRetriesOptions =
-    typeof attemptsOrOpts === 'number'
-      ? { attempts: attemptsOrOpts, onAttempt, ...delayOpts }
-      : attemptsOrOpts;
-
-  const attempts   = opts.attempts   ?? 3;
-  const retryCheck = opts.retryCheck ?? (() => true);
-  const notify     = opts.onAttempt  ?? onAttempt;
+  const attempts = attemptsOpts.maxAttempts;
+  const retryCheck = attemptsOpts.retryCheck ?? (() => true);
+  const notify =
+    attemptsOpts.onAttempt ??
+    (() => {
+      /* noop */
+    });
 
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
@@ -55,7 +65,7 @@ export async function withRetries<T>(
       notify?.(err, i + 1);
       if (!retryCheck(err)) throw err;
       if (i < attempts - 1) {
-        const wait = backoffDelay(i, opts);
+        const wait = backoffDelay(i, attemptsOpts.delayOpts);
         await new Promise<void>((res) => setTimeout(res, wait));
       }
     }

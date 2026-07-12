@@ -1,17 +1,17 @@
 import { Exporter } from '../src/lib/exporter.js';
 import { HttpSender } from '../src/lib/httpSender.js';
 import type { SendOutcome } from '../src/lib/sendOutcome.js';
+import type { IHttpClient } from '../src/lib/clients/IHttpClient.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Build an HttpSender whose underlying fetch returns a controlled sequence of responses. */
+/** Build an HttpSender whose underlying client returns a controlled sequence of responses. */
 function makeSender(responses: SendOutcome[]): HttpSender {
   let call = 0;
-  const sender = new HttpSender({
-    endpoint: 'https://ingest.test/e',
-    fetch: () => {
+  const client: IHttpClient = {
+    post: async () => {
       const outcome = responses[Math.min(call++, responses.length - 1)];
       const status =
         outcome.kind === 'ok'
@@ -21,7 +21,7 @@ function makeSender(responses: SendOutcome[]): HttpSender {
             : outcome.kind === 'retry'
               ? 503
               : 400;
-      return Promise.resolve({
+      return {
         ok: status >= 200 && status < 300,
         status,
         headers: {
@@ -29,11 +29,15 @@ function makeSender(responses: SendOutcome[]): HttpSender {
             outcome.kind === 'retry' && 'retryAfterMs' in outcome
               ? String((outcome as { retryAfterMs?: number }).retryAfterMs ?? '')
               : null
-        }
-      } as unknown as Response);
+        },
+        body: null
+      };
     }
+  };
+  return new HttpSender({
+    endpoint: 'https://ingest.test/e',
+    client
   });
-  return sender;
 }
 
 function makeExporter(sender: HttpSender, overrides: Record<string, unknown> = {}) {
@@ -54,16 +58,15 @@ function makeExporter(sender: HttpSender, overrides: Record<string, unknown> = {
 describe('Exporter — basic send', () => {
   it('flushes buffered items on flush()', async () => {
     let sent: unknown[] = [];
+    const client: IHttpClient = {
+      post: async (_url, body) => {
+        sent = JSON.parse(body as string) as unknown[];
+        return { ok: true, status: 200, headers: { get: () => null }, body: null };
+      }
+    };
     const sender = new HttpSender({
       endpoint: 'https://ingest.test/e',
-      fetch: (_url: string, init: RequestInit) => {
-        sent = JSON.parse(init.body as string) as unknown[];
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          headers: { get: () => null }
-        } as unknown as Response);
-      }
+      client
     });
     const exp = makeExporter(sender);
     exp.enqueue({ id: 1 });
@@ -178,16 +181,15 @@ describe('Exporter — circuit breaker', () => {
 describe('Exporter — retry', () => {
   it('retries transient errors up to the attempt limit', async () => {
     let calls = 0;
+    const client: IHttpClient = {
+      post: async () => {
+        calls++;
+        return { ok: false, status: 503, headers: { get: () => null }, body: null };
+      }
+    };
     const sender = new HttpSender({
       endpoint: 'https://ingest.test/e',
-      fetch: () => {
-        calls++;
-        return Promise.resolve({
-          ok: false,
-          status: 503,
-          headers: { get: () => null }
-        } as unknown as Response);
-      }
+      client
     });
     const exp = makeExporter(sender); // 4 attempts, 0 delay
     exp.enqueue({ id: 1 });
@@ -201,18 +203,17 @@ describe('Exporter — retry', () => {
 
   it('halves the batch on 413 too-large and retries', async () => {
     const bodies: number[][] = [];
-    const sender = new HttpSender({
-      endpoint: 'https://ingest.test/e',
-      fetch: (_url: string, init: RequestInit) => {
-        const batch = JSON.parse(init.body as string) as { id: number }[];
+    const client: IHttpClient = {
+      post: async (_url, body) => {
+        const batch = JSON.parse(body as string) as { id: number }[];
         bodies.push(batch.map((b) => b.id));
         const status = batch.length > 1 ? 413 : 200;
-        return Promise.resolve({
-          ok: status === 200,
-          status,
-          headers: { get: () => null }
-        } as unknown as Response);
+        return { ok: status === 200, status, headers: { get: () => null }, body: null };
       }
+    };
+    const sender = new HttpSender({
+      endpoint: 'https://ingest.test/e',
+      client
     });
     const exp = makeExporter(sender);
     exp.enqueue({ id: 1 });
@@ -261,16 +262,15 @@ describe('Exporter — drain()', () => {
 describe('Exporter — rate limiter', () => {
   it('drops items when rate limit is exceeded', async () => {
     let calls = 0;
+    const client: IHttpClient = {
+      post: async (_url, body) => {
+        calls += (JSON.parse(body as string) as unknown[]).length;
+        return { ok: true, status: 200, headers: { get: () => null }, body: null };
+      }
+    };
     const sender = new HttpSender({
       endpoint: 'https://ingest.test/e',
-      fetch: (_url: string, init: RequestInit) => {
-        calls += (JSON.parse(init.body as string) as unknown[]).length;
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          headers: { get: () => null }
-        } as unknown as Response);
-      }
+      client
     });
     // Bucket holds 1 token with a very long refill interval — only the first item gets through.
     const exp = makeExporter(sender, {
