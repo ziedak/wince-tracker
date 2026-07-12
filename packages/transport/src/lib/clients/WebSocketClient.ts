@@ -2,7 +2,7 @@ import { deserialize, isNumber, isString, serialize } from '@wince/utils';
 import type { IHttpClient, IHttpResponse } from './IHttpClient';
 
 export enum WsReceivedEvent {
-  Ack = 'Ack'
+  Ack = 'Ack',
   /** The WebSocket connection was closed before the server acked the request. */
   // ConnectionClosed = 'ConnectionClosed',
   /** The WebSocket connection was closed before the server acked the request. */
@@ -118,7 +118,7 @@ export class WebSocketClient implements IHttpClient {
       return this._fallback.post(url, body, headers, signal);
     }
 
-    const correlationId = `${++this._correlationSeq}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const correlationId = `${++this._correlationSeq}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
 
     const frame = {
       type: 'event',
@@ -135,8 +135,6 @@ export class WebSocketClient implements IHttpClient {
         reject(new Error(`WebSocket ack timeout for ${correlationId}`));
       }, this._ackTimeoutMs);
 
-      this._pending.set(correlationId, { resolve, reject, timer });
-
       // Also abort if the signal fires
       const onAbort = () => {
         this._pending.delete(correlationId);
@@ -145,12 +143,29 @@ export class WebSocketClient implements IHttpClient {
       };
       signal?.addEventListener('abort', onAbort, { once: true });
 
+      // Wrap resolve/reject to clean up abort listener on settlement
+      const cleanup = () => signal?.removeEventListener('abort', onAbort);
+      const wrappedResolve = (res: IHttpResponse) => {
+        cleanup();
+        resolve(res);
+      };
+      const wrappedReject = (err: Error) => {
+        cleanup();
+        reject(err);
+      };
+
+      this._pending.set(correlationId, {
+        resolve: wrappedResolve,
+        reject: wrappedReject,
+        timer
+      });
+
       try {
         this._ws?.send(serialize(frame));
       } catch (err) {
         this._pending.delete(correlationId);
         clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
+        cleanup();
         reject(err instanceof Error ? err : new Error(String(err)));
       }
     });

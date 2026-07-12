@@ -1,6 +1,6 @@
 import { serialize } from '@wince/utils';
 import { safeSetTimeout } from './safeSetTimeout';
-import type { DropReason } from './types';
+import type { DropReason } from './retry';
 
 export interface BatchQueueOptions<T> {
   /** Flush when buffer reaches this many items. Default: 100 */
@@ -195,9 +195,6 @@ export class BatchQueue<T> {
   onDropped(reason: DropReason, item: T): void {
     this._onDropped(reason, item);
   }
-  // sizeof(item: T): number {
-  //   return this._sizeOf(item);
-  // }
   close(): void {
     this._clearTimer();
   }

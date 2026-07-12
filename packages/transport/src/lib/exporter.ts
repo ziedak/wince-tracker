@@ -5,35 +5,9 @@ import { TokenBucketRateLimiter, type TokenBucketOptions } from './rateLimiter';
 import { backoffDelay, WithRetriesOptions } from './retry';
 import { safeSetTimeout } from './safeSetTimeout';
 import { TrackEventPayload } from '@wince/types';
-// import type { DropReason } from './types';
-
-// export const DEFAULT_EXPORTER_OPTIONS: Partial<ExporterOptions<unknown>> = {
-//   retry: DEFAULT_RETRY_OPTIONS,
-//   rateLimit: DEFAULT_TOKEN_BUCKET_OPTIONS,
-//   batch: DEFAULT_BATCH_QUEUE_OPTS
-// };
-
-// ============================================================================
-// Types
-// ============================================================================
 
 export interface ExporterOptions<T> {
   schemaVersion: number;
-  /** Max items per HTTP request. Default: 100 */
-  // batchSize?: number;
-
-  /**
-   * Max encoded bytes per HTTP request.
-   * The Exporter will use the smaller of `batchSize` and `batchBytes` constraints.
-   * Default: unlimited.
-   */
-  // batchBytes?: number;
-
-  /** Flush interval (ms). Backed off by circuit breaker. Default: 5 000 */
-  // flushIntervalMs?: number;
-
-  /** Max items held in memory. Oldest is dropped when full. Default: 500 */
-  // maxBufferSize?: number;
 
   /** Retry behaviour for transient errors. Default: 4 attempts, exp backoff + jitter. */
   retry: WithRetriesOptions;
@@ -41,34 +15,15 @@ export interface ExporterOptions<T> {
   /** Optional token-bucket rate limit applied before each item is enqueued. */
   rateLimit: TokenBucketOptions;
   batch: BatchQueueOptions<T>;
+
   /**
    * Serialise a batch of items into the HTTP request body.
    * May be async — useful for compression (e.g. gzip) before sending.
    */
-
   compressFn: (input: string | ArrayBuffer | Uint8Array<ArrayBufferLike>) => Promise<Uint8Array>;
 
-  /**
-   * If provided, matching items bypass the batch buffer and are sent immediately
-   * as a single-item HTTP request. Use for ERROR/FATAL priority flushing.
-   */
-  // onPriorityItem?: (item: T) => boolean;
-
-  /**
-   * Optional byte-size estimator for a single item.
-   * Required for accurate `batchBytes` enforcement; falls back to JSON.stringify length.
-   */
-  // sizeOf?: (item: T) => number;
-  /** Called when an event is lost or blocked from delivery. */
-  // onDropped?: (reason: DropReason, item?: T) => void;
   /** Called after a batch is successfully delivered. */
   onBatchDelivered: (eids: string[]) => void;
-  /**
-   * Priority scorer for drain-time sorting.
-   * Higher scores are packed into beacons first. Items with equal scores
-   * maintain their original buffer order. Omit to keep insertion order.
-   */
-  // priorityFn?: (item: T) => number;
 }
 
 // ============================================================================
@@ -101,9 +56,6 @@ export class Exporter<T extends TrackEventPayload> {
   private readonly _queue: BatchQueue<T>;
 
   private readonly _onBatchDelivered: (eids: string[]) => void;
-  // private readonly _onDropped?: (reason: DropReason, item?: T) => void;
-
-  // private readonly _priorityFn?: (item: T) => number;
 
   // Circuit breaker
   private _consecutiveFailures = 0;
@@ -127,7 +79,6 @@ export class Exporter<T extends TrackEventPayload> {
     this._retryOpts = opts.retry;
     this._schemaVersion = opts.schemaVersion;
 
-    //this._onDropped = opts.onDropped;
     this._onBatchDelivered = opts.onBatchDelivered;
     this._compressFn = opts.compressFn;
 
@@ -209,22 +160,9 @@ export class Exporter<T extends TrackEventPayload> {
    * @param opts.encodeSync  - Synchronous encoder (e.g. JSON.stringify or compressSync)
    * @param opts.send        - Fire-and-forget sender (e.g. navigator.sendBeacon wrapper)
    */
-  drain(
-    url: string,
-    // batch: T[]
-    //encodeSync: (batch: T[]) => string | Uint8Array;
-  ): void {
+  drain(url: string): void {
     const items = this._queue.drain();
     if (items.length === 0) return;
-
-    // if (this._priorityFn) {
-    //   const fn = this._priorityFn;
-    //   // Stable sort: items with equal priority keep their original order.
-    //   items = items
-    //     .map((item, i) => ({ item, pri: fn(item), i }))
-    //     .sort((a, b) => b.pri - a.pri || a.i - b.i)
-    //     .map(({ item }) => item);
-    // }
 
     // Greedy packing — at most two beacon passes.
     let remaining = items;
@@ -283,7 +221,6 @@ export class Exporter<T extends TrackEventPayload> {
             // Single oversized record — drop to avoid infinite loop
             console.warn('[Exporter] dropping oversized single record (too-large)');
             this._queue.onDropped('too_large', currentBatch[0]);
-            this._onSuccess(); // treat as consumed
             return;
           }
           // Halve batch, retry immediately (no backoff delay)
@@ -292,9 +229,11 @@ export class Exporter<T extends TrackEventPayload> {
           continue;
 
         case 'fatal':
-          // Non-retryable — drop the batch
+          // Non-retryable — drop the batch. Don't reset circuit breaker:
+          // a 400/401/403 may indicate a configuration issue that won't resolve
+          // by retrying; the circuit breaker remaining open prevents wasted
+          // flushes until the next probe.
           console.warn(`[Exporter] dropping batch: fatal HTTP ${outcome.status}`);
-          this._onSuccess(); // treat as consumed (no point retrying)
           return;
 
         case 'retry': {

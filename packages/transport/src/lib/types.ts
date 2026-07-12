@@ -1,22 +1,9 @@
-import { DEFAULT_RETRY_OPTIONS } from './retry';
+import { DEFAULT_RETRY_OPTIONS, type DropReason } from './retry';
 import { compressAsync } from '@wince/compress';
 import { ExporterOptions } from './exporter';
 import { DEFAULT_BATCH_QUEUE_OPTS } from './batchQueue';
 import { DEFAULT_TOKEN_BUCKET_OPTIONS } from './rateLimiter';
 import { TrackEventPayload } from '@wince/types';
-
-/**
- * Reasons an event or batch can be permanently dropped (or blocked from delivery).
- * Surfaced via the `onEventDropped` callback in WinceConfig.
- */
-export type DropReason =
-  | 'consent' // consent not granted
-  | 'sampling' // sampler rejected the event
-  | 'rate_limit' // token bucket exhausted
-  | 'quota' // server 429 quota signal
-  | 'too_large' // single event exceeds server size limit
-  | 'buffer_full' // maxBufferSize exceeded — oldest event evicted
-  | 'client_dedup'; // identical event fired again within the dedup TTL window
 
 export interface TransportOptions<T extends TrackEventPayload> {
   url: string;
@@ -29,7 +16,6 @@ export interface TransportOptions<T extends TrackEventPayload> {
   };
   compress: {
     enabled: boolean;
-    compressFn: (input: string | ArrayBuffer | Uint8Array<ArrayBufferLike>) => Promise<Uint8Array>;
   };
 
   maxBufferSize: number;
@@ -95,8 +81,7 @@ export const DEFAULT_TRANSPORT_OPTIONS: TransportOptions<TrackEventPayload> = {
     }
   },
   compress: {
-    enabled: true,
-    compressFn: compressAsync
+    enabled: true
   },
   paused: false,
   onDropped: () => {

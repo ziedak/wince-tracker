@@ -1,3 +1,5 @@
+import { safeSetTimeout } from './safeSetTimeout';
+
 export type DropReason =
   | 'consent' // consent not granted
   | 'sampling' // sampler rejected the event
@@ -44,6 +46,7 @@ export const DEFAULT_RETRY_OPTIONS: WithRetriesOptions = {
   maxAttempts: 3,
   delayOpts: DEFAULT_DELAY_OPTIONS
 };
+
 export async function withRetries<T>(
   attemptsOpts: WithRetriesOptions,
   fn: () => Promise<T>
@@ -66,7 +69,7 @@ export async function withRetries<T>(
       if (!retryCheck(err)) throw err;
       if (i < attempts - 1) {
         const wait = backoffDelay(i, attemptsOpts.delayOpts);
-        await new Promise<void>((res) => setTimeout(res, wait));
+        await new Promise<void>((res) => safeSetTimeout(res, wait));
       }
     }
   }

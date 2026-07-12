@@ -18,25 +18,27 @@ export class HttpClient implements IHttpClient {
   ): Promise<IHttpResponse> {
     const finalHeaders = { ...this.defaultHeaders, ...headers };
     const bodySize = isString(body) ? body.length : body.byteLength;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: finalHeaders,
-      body: body as BodyInit,
-      keepalive: bodySize < KEEPALIVE_BYTE_LIMIT,
-      signal
-    });
-    
-    // If the fetch fails, fallback to the provided fallback client (if any)
-    if (!res.ok && this._fallback) {
-      return this._fallback.post(url, body, finalHeaders, signal);
-     
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: finalHeaders,
+        body: body as BodyInit,
+        keepalive: bodySize < KEEPALIVE_BYTE_LIMIT,
+        signal
+      });
+
+      return {
+        ok: res.ok,
+        status: res.status,
+        headers: res.headers,
+        body: res.body
+      };
+    } catch {
+      // Network error (fetch threw) — fallback to the provided client (e.g. sendBeacon)
+      if (this._fallback) {
+        return this._fallback.post(url, body, finalHeaders, signal);
+      }
+      throw new Error('HttpClient: fetch failed and no fallback client is available.');
     }
-   
-    return {
-      ok: res.ok,
-      status: res.status,
-      headers: res.headers,
-      body: res.body
-    };
   }
 }

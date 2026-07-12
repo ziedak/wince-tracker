@@ -1,4 +1,3 @@
-// import { compressSync } from '@wince/types';
 import { Exporter } from './exporter';
 import { HttpSender } from './httpSender';
 import { DEFAULT_TRANSPORT_OPTIONS, type TransportOptions } from './types';
@@ -25,14 +24,10 @@ export class Transport<T extends TrackEventPayload> implements ITransport {
   private readonly _high: Exporter<T>;
   private readonly _normal: Exporter<T>;
   private readonly _url: string;
-  // private readonly _wsUrl: string;
-  // private readonly _requestTimeoutMs: number;
   private readonly _useCompression: boolean;
 
   constructor(client: IHttpClient, opts: TransportOptions<T>) {
     this._url = opts.url;
-    // this._wsUrl = opts.wsUrl;
-    // this._requestTimeoutMs = opts.requestTimeoutMs;
 
     this._useCompression = opts.compress.enabled;
 
@@ -44,15 +39,6 @@ export class Transport<T extends TrackEventPayload> implements ITransport {
       headers,
       requestTimeoutMs: opts.requestTimeoutMs
     });
-
-    // const onBatchDelivered = opts.onBatchDelivered
-    //   ? (items: TrackEventPayload[]) => {
-    //       const eids = items
-    //         .map((e) => (e.eid ? e.eid : null))
-    //         .filter((id): id is string => id !== null);
-    //       if (eids.length > 0) opts.onBatchDelivered(eids);
-    //     }
-    //   : undefined;
 
     // ── Critical lane: one event per flush, no hold time. ──────────────────
     // Events with priority='critical' (exit_intent, rage_click, etc.) are
@@ -150,23 +136,10 @@ export class Transport<T extends TrackEventPayload> implements ITransport {
       return;
     }
 
-    const url = this._url;
-    // const drainOpts = {
-    //   encodeSync: (batch: TrackEventPayload[]) => buildEnvelope(batch),
-    //   send: (data: string | Uint8Array) => {
-    //     const type = typeof data === 'string' ? 'application/json' : 'application/octet-stream';
-    //     (
-    //       navigator as Navigator & {
-    //         sendBeacon: (u: string, b: Blob) => boolean;
-    //       }
-    //     ).sendBeacon(url, new Blob([data as BlobPart], { type }));
-    //   }
-    // };
-
     // Priority order: critical → high → normal.
-    this._critical.drain(url);
-    this._high.drain(url);
-    this._normal.drain(url);
+    this._critical.drain(this._url);
+    this._high.drain(this._url);
+    this._normal.drain(this._url);
   }
 
   async flush(): Promise<void> {
@@ -180,19 +153,6 @@ export class Transport<T extends TrackEventPayload> implements ITransport {
 
 export default Transport;
 
-/**
- * Create a default Transport instance for browser usage.
- * Uses BeaconClient with a Fetch fallback and enables compression by default.
- */
-
-// export function createDefaultTransport(opts?: Partial<TransportOptions>) {
-//   // const client = new BeaconClient();
-//   const transportOpts: TransportOptions = { ...opts, ...DEFAULT_TRANSPORT_OPTIONS };
-//   transportOpts.client = new BeaconClient();
-//   const transport = new Transport(transportOpts);
-//   return transport;
-// }
-
 export function createClientTransport<T extends TrackEventPayload>(
   opts: TransportOptions<T>
 ): Transport<T> {
@@ -205,7 +165,7 @@ export function createClientTransport<T extends TrackEventPayload>(
     },
     httpClient
   );
-  const transportOpts: TransportOptions<T> = { ...opts, ...DEFAULT_TRANSPORT_OPTIONS };
+  const transportOpts: TransportOptions<T> = { ...DEFAULT_TRANSPORT_OPTIONS, ...opts };
 
   const transport = new Transport(webSocketClient, transportOpts);
   return transport;
