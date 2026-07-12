@@ -87,7 +87,12 @@ export class Consent implements IConsent {
     this._ignoreDnt = opts.ignoreDnt ?? false;
     // No HttpOnly — must be browser-readable. SameSite=Lax prevents CSRF misuse.
     // SameSite is always Lax for consent, because we want the cookie to be sent on top-level navigations and GET requests, but not on cross-site POST requests. This is a security measure to prevent CSRF attacks. The cookie is also set with the Secure flag if the page is served over HTTPS, which ensures that the cookie is only sent over secure connections.
-    if (this._store.getStrategy() !== 'cookie') {
+    const strategy = this._store.getStrategy();
+    const isCookieStore =
+      Array.isArray(strategy)
+        ? strategy.includes('cookie')
+        : strategy === 'cookie';
+    if (!isCookieStore) {
       throw new Error(
         'Consent store must be a cookie store. Please use a cookie store.SameSite is always Lax'
       );

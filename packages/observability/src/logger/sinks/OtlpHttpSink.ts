@@ -1,7 +1,5 @@
-import { Exporter, HttpSender, type ExporterOptions } from '@wince/transport';
 import type { ILogSink, LogAttributeValue, LogRecord, Resource } from '../logger.type';
-import { LogLevel } from '../logger.type';
-
+import { HttpClient, HttpSender, NoPClient, type ExporterOptions } from '@wince/transport';
 // ============================================================================
 // OTLP wire types — internal to this file, never exported
 // ============================================================================
@@ -13,7 +11,10 @@ interface OtlpAnyValue {
   boolValue?: boolean;
   arrayValue?: { values: OtlpAnyValue[] };
 }
-interface OtlpKV { key: string; value: OtlpAnyValue; }
+interface OtlpKV {
+  key: string;
+  value: OtlpAnyValue;
+}
 
 interface OtlpWireRecord {
   timeUnixNano: string;
@@ -52,7 +53,11 @@ function toOtlpValue(v: LogAttributeValue): OtlpAnyValue {
   if (Array.isArray(v)) {
     return { arrayValue: { values: (v as LogAttributeValue[]).map(toOtlpValue) } };
   }
-  try { return { stringValue: JSON.stringify(v) }; } catch { return { stringValue: String(v) }; }
+  try {
+    return { stringValue: JSON.stringify(v) };
+  } catch {
+    return { stringValue: String(v) };
+  }
 }
 
 function toKVList(attrs: Record<string, LogAttributeValue>): OtlpKV[] {
@@ -64,22 +69,22 @@ function toKVList(attrs: Record<string, LogAttributeValue>): OtlpKV[] {
 function encodeRecord(rec: LogRecord): OtlpWireRecord {
   const attrs = toKVList(rec.fields as Record<string, LogAttributeValue>);
   if (rec.error) {
-    attrs.push({ key: 'error.type',    value: { stringValue: rec.error.name } });
+    attrs.push({ key: 'error.type', value: { stringValue: rec.error.name } });
     attrs.push({ key: 'error.message', value: { stringValue: rec.error.message } });
     if (rec.error.stack) {
       attrs.push({ key: 'error.stack', value: { stringValue: rec.error.stack } });
     }
   }
   const wire: OtlpWireRecord = {
-    timeUnixNano:         rec.timestampNano,
+    timeUnixNano: rec.timestampNano,
     observedTimeUnixNano: rec.timestampNano,
-    severityNumber:       rec.severityNumber,
-    severityText:         rec.severityText,
-    body:                 { stringValue: rec.message },
-    attributes:           attrs,
+    severityNumber: rec.severityNumber,
+    severityText: rec.severityText,
+    body: { stringValue: rec.message },
+    attributes: attrs
   };
   if (rec.traceId) wire.traceId = rec.traceId;
-  if (rec.spanId)  wire.spanId  = rec.spanId;
+  if (rec.spanId) wire.spanId = rec.spanId;
   return wire;
 }
 
@@ -90,26 +95,30 @@ function buildResourceAttrs(resource: Resource): OtlpKV[] {
       attrs[k] = v;
     }
   }
-  if (resource.serviceName)    attrs['service.name']           = resource.serviceName;
-  if (resource.serviceVersion) attrs['service.version']        = resource.serviceVersion;
-  if (resource.environment)    attrs['deployment.environment'] = resource.environment;
+  if (resource.serviceName) attrs['service.name'] = resource.serviceName;
+  if (resource.serviceVersion) attrs['service.version'] = resource.serviceVersion;
+  if (resource.environment) attrs['deployment.environment'] = resource.environment;
   return toKVList(attrs);
 }
 
 function buildOtlpPayload(
   batch: LogRecord[],
   scopeName: string,
-  scopeVersion?: string,
+  scopeVersion?: string
 ): OtlpPayload {
   const resource = batch[0]?.resource ?? {};
   return {
-    resourceLogs: [{
-      resource: { attributes: buildResourceAttrs(resource) },
-      scopeLogs: [{
-        scope: { name: scopeName, ...(scopeVersion ? { version: scopeVersion } : {}) },
-        logRecords: batch.map(encodeRecord),
-      }],
-    }],
+    resourceLogs: [
+      {
+        resource: { attributes: buildResourceAttrs(resource) },
+        scopeLogs: [
+          {
+            scope: { name: scopeName, ...(scopeVersion ? { version: scopeVersion } : {}) },
+            logRecords: batch.map(encodeRecord)
+          }
+        ]
+      }
+    ]
   };
 }
 
@@ -137,41 +146,37 @@ export interface OtlpHttpSinkOptions {
 // ============================================================================
 
 export class OtlpHttpSink implements ILogSink {
-  private readonly _exporter: Exporter<LogRecord>;
+  private _exporter: LogRecord[] = [];
+  opts: OtlpHttpSinkOptions;
+  sender: HttpSender;
 
   constructor(opts: OtlpHttpSinkOptions) {
-    const scopeName    = opts.scopeName    ?? 'wince';
-    const scopeVersion = opts.scopeVersion;
-
-    const sender = new HttpSender({
-      endpoint:         opts.endpoint,
-      headers:          { 'Content-Type': 'application/json', ...opts.headers },
-      requestTimeoutMs: opts.requestTimeoutMs,
-      fetch:            opts.fetch,
-    });
-
-    this._exporter = new Exporter<LogRecord>({
-      sender,
-      encode:          (batch) => JSON.stringify(buildOtlpPayload(batch, scopeName, scopeVersion)),
-      batchSize:       opts.maxBatchSize    ?? 100,
-      batchBytes:      opts.maxBatchBytes,
-      flushIntervalMs: opts.flushIntervalMs ?? 3_000,
-      maxBufferSize:   opts.maxBufferSize   ?? 500,
-      rateLimit:       opts.rateLimit,
-      retry:           opts.retry,
-      onPriorityItem:  (rec) => rec.severityNumber >= LogLevel.ERROR,
+    this.opts = opts;
+    const httpClient = new HttpClient({}, new NoPClient());
+    this.sender = new HttpSender(httpClient, {
+      endpoint: opts.endpoint,
+      headers: { 'Content-Type': 'application/json', ...opts.headers },
+      requestTimeoutMs: opts.requestTimeoutMs
     });
   }
 
   write(record: LogRecord): void {
-    this._exporter.enqueue(record);
+    this._exporter.push(record);
+    if (this._exporter.length >= (this.opts.maxBatchSize ?? 50)) {
+      this.sender.send(
+        JSON.stringify(
+          buildOtlpPayload(this._exporter, this.opts.scopeName ?? 'wince', this.opts.scopeVersion)
+        )
+      );
+      this.flush();
+    }
   }
 
   async flush(): Promise<void> {
-    return this._exporter.flush();
+    this._exporter = [];
   }
 
   async close(): Promise<void> {
-    return this._exporter.close();
+    await this.flush();
   }
 }

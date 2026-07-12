@@ -258,7 +258,7 @@ export class Exporter<T extends TrackEventPayload> {
     throw new Error('[Exporter] send failed after maximum retry attempts');
   }
 
-  private _buildEnvelope(batch: TrackEventPayload[]): string {
+  private _buildEnvelope(batch: T[]): string {
     const sent_at = Date.now();
     const events = batch.map((e) => {
       const ts = e.ts ? e.ts : sent_at;

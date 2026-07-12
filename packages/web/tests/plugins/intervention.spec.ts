@@ -1,5 +1,5 @@
-import { mountIntervention } from '../intervention';
-import type { InterventionEventProps } from '../types';
+import { mountIntervention } from '../../src/plugins/intervention.js';
+import type { InterventionEventProps } from '../../src/plugins/types.js';
 
 const BASE_PROPS: InterventionEventProps = {
   intervention_id:   'inv-001',

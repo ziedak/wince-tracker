@@ -3,6 +3,7 @@
 import { Consent, ConsentStatus, IConsent } from '@wince/consent';
 import Transport, { DEFAULT_TRANSPORT_OPTIONS } from '@wince/transport';
 import { DropReason, IStorage, TrackEventPayload } from '@wince/types';
+import { SessionStore } from '@wince/storage';
 import { WINDOW_ID_KEY, getOrCreateWindowId } from '../../src/lib/_windowId.js';
 import { BaseClient } from '../../src/lib/baseClient.js';
 import { wireConsent } from '../../src/lib/consentWire.js';
@@ -294,55 +295,52 @@ describe('fetchEnrichment', () => {
 });
 
 describe('window id helper', () => {
-  let originalSessionStorage: Storage | undefined;
+  // The implementation uses SessionStore from @wince/storage, which is a
+  // module-level singleton. We mock its get/set methods directly.
+  let storeData = new Map<string, unknown>();
 
   beforeEach(() => {
-    originalSessionStorage = (globalThis as Record<string, unknown>).sessionStorage as
-      | Storage
-      | undefined;
-    Object.defineProperty(globalThis, 'sessionStorage', {
-      value: createStorageMock(),
-      configurable: true
+    storeData = new Map<string, unknown>();
+    jest.spyOn(SessionStore, 'get').mockImplementation(<T>(key: string): T | undefined => {
+      return storeData.get(key) as T | undefined;
+    });
+    jest.spyOn(SessionStore, 'set').mockImplementation((key: string, value: unknown) => {
+      storeData.set(key, value);
     });
   });
 
   afterEach(() => {
-    Object.defineProperty(globalThis, 'sessionStorage', {
-      value: originalSessionStorage,
-      configurable: true
-    });
-    originalSessionStorage = undefined;
+    jest.restoreAllMocks();
   });
 
   it('reuses the stored window id when present', () => {
-    sessionStorage.setItem(WINDOW_ID_KEY, 'stored-window-id');
+    storeData.set(WINDOW_ID_KEY, 'stored-window-id');
     expect(getOrCreateWindowId()).toBe('stored-window-id');
   });
 
   it('stores a generated id when none is present', () => {
     const id = getOrCreateWindowId();
 
-    expect(id).toBe(sessionStorage.getItem(WINDOW_ID_KEY));
+    expect(id).toBe(storeData.get(WINDOW_ID_KEY));
     expect(id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('falls back when sessionStorage throws', () => {
-    const getItemSpy = jest.spyOn(sessionStorage, 'getItem').mockImplementation(() => {
+    jest.spyOn(SessionStore, 'get').mockImplementation(() => {
       throw new Error('blocked');
     });
 
     expect(getOrCreateWindowId()).toMatch(/^[0-9a-f-]{36}$/);
-    getItemSpy.mockRestore();
   });
 });
 
 describe('BaseClient', () => {
-  it('starts and pauses the transport when consent is disabled', () => {
+  it('starts the transport when consent is granted and delegates optIn/optOut to consent', () => {
        const mockConsent: IConsent = {
       isGranted: () => true,
       onChange: () => () => {},
-      optIn: () => {},
-      optOut: () => {},
+      optIn: jest.fn(),
+      optOut: jest.fn(),
       clear: () => {},
       isDntActive: () => false,
       getStatus: function (): ConsentStatus {
@@ -365,11 +363,14 @@ describe('BaseClient', () => {
 
     expect(client.transportMock.start).toHaveBeenCalledTimes(1);
 
+    // When consent is provided, optOut/optIn delegate to the consent instance
+    // (which fires onChange → wireConsent → transport.pause/start in WinceClient).
+    // BaseClient itself does not directly pause/start the transport.
     client.optOut();
-    expect(client.transportMock.pause).toHaveBeenCalledTimes(1);
+    expect(mockConsent.optOut).toHaveBeenCalledTimes(1);
 
     client.optIn();
-    expect(client.transportMock.start).toHaveBeenCalledTimes(2);
+    expect(mockConsent.optIn).toHaveBeenCalledTimes(1);
   });
 
 

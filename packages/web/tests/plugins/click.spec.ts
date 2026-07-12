@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { mountClick } from '../click';
+import { mountClick } from '../../src/plugins/click.js';
 
 describe('mountClick', () => {
   afterEach(() => {
@@ -26,7 +26,7 @@ describe('mountClick', () => {
       tag: 'button',
       text: 'Buy now',
       label: 'Buy',
-      foo: 'bar',
+      attrs: { foo: 'bar' },
       elements_chain: expect.any(String),
     }));
 

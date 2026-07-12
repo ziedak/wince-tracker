@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { mountTabFocus } from '../tabFocus';
+import { mountTabFocus } from '../../src/plugins/tabFocus.js';
 
 function setVisibility(hidden: boolean) {
   Object.defineProperty(document, 'hidden', {

@@ -1,4 +1,4 @@
-import { mountElementVisibility } from '../elementVisibility';
+import { mountElementVisibility } from '../../src/plugins/elementVisibility.js';
 
 // jsdom doesn't implement IntersectionObserver — we mock it.
 type IOCallback = (entries: IntersectionObserverEntry[]) => void;

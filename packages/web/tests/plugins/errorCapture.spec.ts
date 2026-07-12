@@ -1,4 +1,4 @@
-import { mountErrorCapture } from '../errorCapture';
+import { mountErrorCapture } from '../../src/plugins/errorCapture.js';
 
 
 describe('mountErrorCapture', () => {

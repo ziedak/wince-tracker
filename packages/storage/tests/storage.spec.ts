@@ -33,27 +33,13 @@ function createStorageMock(): Storage {
 }
 
 function installCookieEnvironment(
-  options: { hostname?: string; protocol?: string; acceptedDomain?: string } = {}
+  options: { hostname?: string } = {}
 ) {
   const cookieJar = new Map<string, string>();
   const documentObject = globalThis.document as Document | undefined;
-  const locationObject = globalThis.location as Location | undefined;
   const originalCookieDescriptor = documentObject
     ? Object.getOwnPropertyDescriptor(documentObject, 'cookie')
     : undefined;
-  const originalLocationDescriptor = locationObject
-    ? Object.getOwnPropertyDescriptor(locationObject, 'hostname')
-    : undefined;
-
-  // Always ensure hostname is explicitly set for probing
-  if (locationObject && originalLocationDescriptor) {
-    Object.defineProperty(locationObject, 'hostname', {
-      configurable: true,
-      get() {
-        return options.hostname ?? 'localhost';
-      }
-    });
-  }
 
   if (documentObject) {
     Object.defineProperty(documentObject, 'cookie', {
@@ -94,9 +80,6 @@ function installCookieEnvironment(
   return () => {
     if (documentObject && originalCookieDescriptor) {
       Object.defineProperty(documentObject, 'cookie', originalCookieDescriptor);
-    }
-    if (locationObject && originalLocationDescriptor) {
-      Object.defineProperty(locationObject, 'hostname', originalLocationDescriptor);
     }
   };
 }
@@ -219,8 +202,7 @@ describe('CookieStore', () => {
 
   beforeEach(() => {
     restoreBrowserEnvironment = installCookieEnvironment({
-      hostname: 'app.example.test',
-      acceptedDomain: 'example.test'
+      hostname: 'app.example.test'
     });
     resetRootDomainCache();
   });
@@ -370,9 +352,7 @@ describe('getRootDomain', () => {
 
   beforeEach(() => {
     restoreBrowserEnvironment = installCookieEnvironment({
-      hostname: 'app.example.test',
-      protocol: 'https:',
-      acceptedDomain: 'example.test'
+      hostname: 'app.example.test'
     });
     resetRootDomainCache();
   });
@@ -421,6 +401,16 @@ function flushIdb(): Promise<void> {
 
 describe('DurableQueue', () => {
   let queue: DurableQueue;
+
+  beforeAll(() => {
+    // fake-indexeddb v6 calls structuredClone() internally on put().
+    // jsdom may not expose it — polyfill using Node's v8 serializer.
+    if (typeof globalThis.structuredClone === 'undefined') {
+      const v8 = require('v8');
+      globalThis.structuredClone = (value: unknown) =>
+        v8.deserialize(v8.serialize(value));
+    }
+  });
 
   beforeEach(() => {
     // Give each test an isolated in-memory IDB by replacing the factory.

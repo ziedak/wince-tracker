@@ -1,4 +1,4 @@
-import { mountExitIntent } from '../exitIntent';
+import { mountExitIntent } from '../../src/plugins/exitIntent.js';
 
 describe('mountExitIntent', () => {
   afterEach(() => {
@@ -14,7 +14,7 @@ describe('mountExitIntent', () => {
     document.dispatchEvent(ev);
 
     expect(tracker.track).toHaveBeenCalledTimes(1);
-    expect(tracker.track).toHaveBeenCalledWith('$exit_intent', expect.objectContaining({ page: expect.any(String) }), undefined, { priority: 'critical' });
+    expect(tracker.track).toHaveBeenCalledWith('$exit_intent', expect.objectContaining({ page: expect.any(String) }), undefined, 2);
 
     // second event ignored
     document.dispatchEvent(ev);

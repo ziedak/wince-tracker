@@ -1,4 +1,4 @@
-import { mountValidationError } from '../validationError';
+import { mountValidationError } from '../../src/plugins/validationError.js';
 
 describe('mountValidationError', () => {
   afterEach(() => {

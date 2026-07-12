@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
-import { mountCart } from '../cart';
-import type { WinceClient } from '../../client';
+import { mountCart } from '../../src/plugins/cart.js';
+import type { WinceClient } from '../../src/client.js';
 
 // Partial mock that satisfies the structural requirements mountCart uses.
 // Cast to WinceClient so TypeScript is happy with the argument type while
@@ -35,7 +35,7 @@ describe('mountCart — basic forwarding', () => {
       '$cart_add',
       expect.objectContaining({ product_id: 'SKU-1', price: 9.99 }),
       undefined,
-      expect.objectContaining({ priority: 'high' }),
+      1,
     );
 
     cleanup();
@@ -52,7 +52,7 @@ describe('mountCart — basic forwarding', () => {
         `$cart_${action}`,
         expect.any(Object),
         undefined,
-        expect.objectContaining({ priority: 'high' }),
+        1,
       );
     }
 
@@ -69,7 +69,7 @@ describe('mountCart — basic forwarding', () => {
       '$cart_view_cart',
       expect.any(Object),
       undefined,
-      undefined,
+      0,
     );
 
     cleanup();
@@ -113,7 +113,7 @@ describe('mountCart — autoAbandon', () => {
         $plugin_source: 'cart',
       }),
       undefined,
-      expect.objectContaining({ priority: 'critical' }),
+      2,
     );
 
     cleanup();
@@ -152,7 +152,7 @@ describe('mountCart — autoAbandon', () => {
       '$cart_checkout_abandon',
       expect.objectContaining({ trigger: 'exit_intent' }),
       undefined,
-      expect.objectContaining({ priority: 'critical' }),
+      2,
     );
 
     cleanup();
@@ -201,7 +201,7 @@ describe('mountCart — autoAbandon', () => {
       '$cart_checkout_abandon',
       expect.objectContaining({ trigger: 'idle' }),
       undefined,
-      expect.objectContaining({ priority: 'critical' }),
+      2,
     );
 
     cleanup();
@@ -230,7 +230,7 @@ describe('mountCart — autoAbandon', () => {
       '$cart_checkout_abandon',
       expect.objectContaining({ trigger: 'pagehide', cart_value_total: 100 }),
       undefined,
-      expect.objectContaining({ priority: 'critical' }),
+      2,
     );
 
     cleanup();

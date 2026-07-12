@@ -1,4 +1,4 @@
-import { mountPageView } from '../pageView';
+import { mountPageView } from '../../src/plugins/pageView.js';
 
 
 describe('mountPageView', () => {

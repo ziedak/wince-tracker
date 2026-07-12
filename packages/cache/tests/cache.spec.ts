@@ -1,27 +1,27 @@
-import { LRUCache } from './cache';
+import { LRUCache } from "../src/cache.js";
 
 describe('LRUCache', () => {
   describe('basic get/set/has/delete', () => {
     it('stores and retrieves a value', () => {
-      const c = new LRUCache<string, number>({ maxSize: 3 });
+      const c = new LRUCache({ maxSize: 3 });
       c.set('a', 1);
       expect(c.get('a')).toBe(1);
     });
 
     it('returns undefined for missing keys', () => {
-      const c = new LRUCache<string, number>({ maxSize: 3 });
+      const c = new LRUCache({ maxSize: 3 });
       expect(c.get('x')).toBeUndefined();
     });
 
     it('has() returns true for existing, false for missing', () => {
-      const c = new LRUCache<string, number>({ maxSize: 3 });
+      const c = new LRUCache({ maxSize: 3 });
       c.set('a', 1);
       expect(c.has('a')).toBe(true);
       expect(c.has('b')).toBe(false);
     });
 
     it('delete() removes the entry', () => {
-      const c = new LRUCache<string, number>({ maxSize: 3 });
+      const c = new LRUCache({ maxSize: 3 });
       c.set('a', 1);
       expect(c.delete('a')).toBe(true);
       expect(c.has('a')).toBe(false);
@@ -29,7 +29,7 @@ describe('LRUCache', () => {
     });
 
     it('clear() empties the cache', () => {
-      const c = new LRUCache<string, number>({ maxSize: 3 });
+      const c = new LRUCache({ maxSize: 3 });
       c.set('a', 1);
       c.set('b', 2);
       c.clear();
@@ -38,7 +38,7 @@ describe('LRUCache', () => {
     });
 
     it('size reflects entry count', () => {
-      const c = new LRUCache<string, number>({ maxSize: 5 });
+      const c = new LRUCache({ maxSize: 5 });
       expect(c.size).toBe(0);
       c.set('a', 1);
       c.set('b', 2);
@@ -48,7 +48,7 @@ describe('LRUCache', () => {
     });
 
     it('overwriting a key updates value and moves to MRU', () => {
-      const c = new LRUCache<string, number>({ maxSize: 2 });
+      const c = new LRUCache({ maxSize: 2 });
       c.set('a', 1);
       c.set('b', 2);
       c.set('a', 99); // update — a is now MRU
@@ -61,7 +61,7 @@ describe('LRUCache', () => {
 
   describe('LRU eviction', () => {
     it('evicts the least-recently-used entry when full', () => {
-      const c = new LRUCache<string, number>({ maxSize: 3 });
+      const c = new LRUCache({ maxSize: 3 });
       c.set('a', 1);
       c.set('b', 2);
       c.set('c', 3);
@@ -73,7 +73,7 @@ describe('LRUCache', () => {
     });
 
     it('get() promotes an entry so it is not evicted', () => {
-      const c = new LRUCache<string, number>({ maxSize: 3 });
+      const c = new LRUCache({ maxSize: 3 });
       c.set('a', 1);
       c.set('b', 2);
       c.set('c', 3);
@@ -84,7 +84,7 @@ describe('LRUCache', () => {
     });
 
     it('evicts in FIFO order when nothing is accessed', () => {
-      const c = new LRUCache<string, number>({ maxSize: 2 });
+      const c = new LRUCache({ maxSize: 2 });
       c.set('a', 1);
       c.set('b', 2);
       c.set('c', 3); // a evicted
@@ -96,7 +96,7 @@ describe('LRUCache', () => {
     });
 
     it('maxSize=1 always keeps only the latest entry', () => {
-      const c = new LRUCache<string, number>({ maxSize: 1 });
+      const c = new LRUCache({ maxSize: 1 });
       c.set('a', 1);
       c.set('b', 2);
       expect(c.has('a')).toBe(false);
@@ -113,28 +113,28 @@ describe('LRUCache', () => {
     afterEach(() => jest.useRealTimers());
 
     it('entry is accessible before TTL expires', () => {
-      const c = new LRUCache<string, number>({ maxSize: 3, ttlMs: 1000 });
+      const c = new LRUCache({ maxSize: 3, ttlMs: 1000 });
       c.set('a', 1);
       jest.advanceTimersByTime(999);
       expect(c.get('a')).toBe(1);
     });
 
     it('get() returns undefined after TTL expires', () => {
-      const c = new LRUCache<string, number>({ maxSize: 3, ttlMs: 1000 });
+      const c = new LRUCache({ maxSize: 3, ttlMs: 1000 });
       c.set('a', 1);
       jest.advanceTimersByTime(1001);
       expect(c.get('a')).toBeUndefined();
     });
 
     it('has() returns false after TTL expires', () => {
-      const c = new LRUCache<string, number>({ maxSize: 3, ttlMs: 500 });
+      const c = new LRUCache({ maxSize: 3, ttlMs: 500 });
       c.set('a', 1);
       jest.advanceTimersByTime(501);
       expect(c.has('a')).toBe(false);
     });
 
     it('set() refreshes TTL on existing key', () => {
-      const c = new LRUCache<string, number>({ maxSize: 3, ttlMs: 1000 });
+      const c = new LRUCache({ maxSize: 3, ttlMs: 1000 });
       c.set('a', 1);
       jest.advanceTimersByTime(800);
       c.set('a', 2); // refresh
@@ -143,7 +143,7 @@ describe('LRUCache', () => {
     });
 
     it('expired entry is removed from size count', () => {
-      const c = new LRUCache<string, number>({ maxSize: 3, ttlMs: 100 });
+      const c = new LRUCache({ maxSize: 3, ttlMs: 100 });
       c.set('a', 1);
       expect(c.size).toBe(1);
       jest.advanceTimersByTime(101);

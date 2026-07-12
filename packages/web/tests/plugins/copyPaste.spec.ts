@@ -1,4 +1,4 @@
-import { mountCopyPaste } from '../copyPaste';
+import { mountCopyPaste } from '../../src/plugins/copyPaste.js';
 
 describe('mountCopyPaste', () => {
   afterEach(() => {

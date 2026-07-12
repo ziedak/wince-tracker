@@ -1,4 +1,4 @@
-import { mountDoubleSubmit } from '../doubleSubmit';
+import { mountDoubleSubmit } from '../../src/plugins/doubleSubmit.js';
 
 describe('mountDoubleSubmit', () => {
   beforeEach(() => jest.useFakeTimers());

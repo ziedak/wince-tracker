@@ -1,4 +1,4 @@
-import { mountBacktrack } from '../backtrack';
+import { mountBacktrack } from '../../src/plugins/backtrack.js';
 
 describe('mountBacktrack', () => {
   afterEach(() => {

@@ -18,17 +18,42 @@ function makeFetch(status = 200) {
 
 /** Create a client with consent disabled and compression off (for readable request bodies). */
 function makeClient(overrides: Partial<WinceConfig> = {}, _consent: IConsent) {
+  const fetchFn = overrides.fetch ?? makeFetch();
+  // The transport uses the global fetch via HttpClient, so we mock it here.
+  (globalThis as Record<string, unknown>).fetch = fetchFn;
+
+  const useCompression = overrides.compress ?? false;
+  // Override compressFn to passthrough when compression is disabled
+  // so request bodies remain JSON strings for easy inspection.
+  const passthrough = async (input: string | ArrayBuffer | Uint8Array) =>
+    input as unknown as Uint8Array;
+  const transportOptions = {
+    ...DEFAULT_TRANSPORT_OPTIONS,
+    url: overrides.endpoint ?? 'https://ingest.test/events',
+    compress: { enabled: useCompression },
+    paused: true,
+    exporterOpts: {
+      critical: {
+        ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.critical,
+        compressFn: useCompression ? DEFAULT_TRANSPORT_OPTIONS.exporterOpts.critical.compressFn : passthrough,
+      },
+      high: {
+        ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.high,
+        compressFn: useCompression ? DEFAULT_TRANSPORT_OPTIONS.exporterOpts.high.compressFn : passthrough,
+      },
+      normal: {
+        ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.normal,
+        compressFn: useCompression ? DEFAULT_TRANSPORT_OPTIONS.exporterOpts.normal.compressFn : passthrough,
+      },
+    },
+  };
+
   return new WinceClient(
     {
       endpoint: 'https://ingest.test/events',
-      transportOptions: DEFAULT_TRANSPORT_OPTIONS,
+      transportOptions,
       consentOptions: {},
-
-      // consent: null, // disable consent gating by default
-      // compress: false, // keep bodies as JSON strings for easy inspection
-      // batchSize: 50,
-      // batchTimeoutMs: 100,
-      fetch: makeFetch(),
+      fetch: fetchFn,
       ...overrides
     },
     _consent

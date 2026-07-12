@@ -23,6 +23,7 @@ import type { MainToWorkerMsg, WorkerToMainMsg, WorkerConfig } from './messages'
 import { buildBaseDiagnostics } from '../lib/diagnostics';
 import { BaseClient } from '../lib/baseClient';
 import { type TrackEventPayload } from '@wince/types';
+import type { IConsent } from '@wince/consent';
 
 // ---------------------------------------------------------------------------
 // WorkerClient
@@ -47,8 +48,8 @@ export class WorkerClient extends BaseClient {
   private _idbSizeSeq = 0;
   private readonly _idbSizeResolvers = new Map<number, (size: number) => void>();
 
-  constructor(config: WinceConfig, worker: Worker) {
-    super(config);
+  constructor(config: WinceConfig, worker: Worker, _consent?: IConsent) {
+    super(config, _consent);
 
     this._worker = worker;
     this._worker.onmessage = (e: MessageEvent<WorkerToMainMsg>) => this._onMessage(e.data);

@@ -1,19 +1,20 @@
 /** @jest-environment jsdom */
-import { mountTextSelection } from '../textSelection';
+import { mountTextSelection } from '../../src/plugins/textSelection.js';
 
 function mockSelection(text: string, anchorTag = 'P'): void {
-  const range = {
-    toString: () => text,
-  };
   const anchorEl = document.createElement(anchorTag.toLowerCase());
   const anchorNode = { parentElement: anchorEl };
   const sel: Partial<Selection> = {
     isCollapsed:  false,
     toString:     () => text,
     anchorNode:   anchorNode as unknown as Node,
+    getRangeAt:   (() => ({
+      commonAncestorContainer: {
+        childNodes: [],
+      },
+    })) as unknown as (index: number) => Range,
   };
   jest.spyOn(document, 'getSelection').mockReturnValue(sel as unknown as Selection);
-  void range; // suppress unused warning
 }
 
 describe('mountTextSelection', () => {
@@ -125,6 +126,11 @@ describe('mountTextSelection', () => {
       isCollapsed:  false,
       toString:     () => 'Some price',
       anchorNode:   anchorNode as unknown as Node,
+      getRangeAt:   (() => ({
+        commonAncestorContainer: {
+          childNodes: [],
+        },
+      })) as unknown as (index: number) => Range,
     } as unknown as Selection);
 
     const tracker: any = { track: jest.fn() };

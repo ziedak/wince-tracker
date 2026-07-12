@@ -123,6 +123,11 @@
       "name": "@wince/observability",
       "version": "0.0.1",
       "dependencies": {
+        "@wince/transport": "*",
+        "@wince/types": "*",
+        "@wince/utils": "*",
+      },
+      "devDependencies": {
         "@nx/jest": "*",
       },
     },

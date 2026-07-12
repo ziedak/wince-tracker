@@ -1,7 +1,9 @@
-import { WorkerClient, initWithWorker } from './client';
-import { WinceClient } from '../client';
-import type { MainToWorkerMsg, WorkerToMainMsg } from './messages';
-import { TrackEventPayload } from '@wince/types';
+import { WorkerClient, initWithWorker } from '../src/worker/client.js';
+import { WinceClient } from '../src/client.js';
+import type { MainToWorkerMsg, WorkerToMainMsg } from '../src/worker/messages.js';
+import { EventPriority, TrackEventPayload } from '@wince/types';
+import type { IConsent } from '@wince/consent';
+import { DEFAULT_TRANSPORT_OPTIONS } from '@wince/transport';
 
 // ---------------------------------------------------------------------------
 // MockWorker — simulates the browser Worker API
@@ -46,21 +48,87 @@ function makeFetch(status = 200) {
   } as unknown as Response);
 }
 
+function setCompression(enabled: boolean) {
+  return {
+    exporterOpts: {
+      critical: {
+        ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.critical,
+        compressFn: enabled
+          ? DEFAULT_TRANSPORT_OPTIONS.exporterOpts.critical.compressFn
+          : (async (input: string | ArrayBuffer | Uint8Array) => input as unknown as Uint8Array),
+      },
+      high: {
+        ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.high,
+        compressFn: enabled
+          ? DEFAULT_TRANSPORT_OPTIONS.exporterOpts.high.compressFn
+          : (async (input: string | ArrayBuffer | Uint8Array) => input as unknown as Uint8Array),
+      },
+      normal: {
+        ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.normal,
+        compressFn: enabled
+          ? DEFAULT_TRANSPORT_OPTIONS.exporterOpts.normal.compressFn
+          : (async (input: string | ArrayBuffer | Uint8Array) => input as unknown as Uint8Array),
+      },
+    },
+  };
+}
+
+function baseConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    endpoint: 'https://ingest.test/events',
+    transportOptions: {
+      ...DEFAULT_TRANSPORT_OPTIONS,
+      paused: true,
+      ...setCompression(false),
+    },
+    consentOptions: {},
+    fetch: makeFetch(),
+    ...overrides,
+  };
+}
+
+function mockGrantedConsent(): IConsent {
+  return {
+    isGranted: () => true,
+    onChange: () => () => {},
+    optIn: () => {},
+    optOut: () => {},
+    clear: () => {},
+    isDntActive: () => false,
+    getStatus: () => -1,
+    isDenied: () => false,
+    isPending: () => false,
+  };
+}
+
 function makeWorkerClient() {
   const mockWorker = new MockWorker();
   const fetchFn = makeFetch();
+  // Mock global fetch so transport can use it
+  (globalThis as Record<string, unknown>).fetch = fetchFn;
   const client = new WorkerClient(
-    {
-      endpoint: 'https://ingest.test/events',
-      consent: null,
-      compress: false,
-      batchSize: 50,
-      batchTimeoutMs: 100,
+    baseConfig({
       fetch: fetchFn,
-    },
+    }),
     mockWorker as unknown as Worker,
+    mockGrantedConsent(),
   );
   return { client, mockWorker, fetchFn };
+}
+
+function makeEnrichedEvent(
+  overrides: Partial<TrackEventPayload> = {},
+): TrackEventPayload {
+  return {
+    eid: '01975e3a-0001-7000-8000-000000000001',
+    seq: 0,
+    n: 'page_view',
+    ts: Date.now(),
+    sid: '01975e3a-0001-7000-8000-000000000002',
+    anon: '01975e3a-0001-7000-8000-000000000003',
+    priority: EventPriority.Normal,
+    ...overrides,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -78,14 +146,10 @@ describe('WorkerClient — initialisation', () => {
   it('passes sessionIdleTimeoutMs and sampleRate in init config', () => {
     const mockWorker = new MockWorker();
     new WorkerClient(
-      {
-        endpoint: 'https://x.test',
-        consent: null,
-        compress: false,
+      baseConfig({
         sessionIdleTimeoutMs: 60_000,
         sampleRate: 0.5,
-        fetch: makeFetch(),
-      },
+      }),
       mockWorker as unknown as Worker,
     );
     const initMsg = mockWorker
@@ -120,14 +184,7 @@ describe('WorkerClient — track()', () => {
 
   it('queues the enriched event in the Transport when Worker replies', async () => {
     const { client, mockWorker, fetchFn } = makeWorkerClient();
-    const enrichedEvent: TrackEventPayload = {
-      eid: '01975e3a-0001-7000-8000-000000000001',
-      seq: 0,
-      n: 'page_view',
-      ts: Date.now(),
-      sid: '01975e3a-0001-7000-8000-000000000002',
-      anon: '01975e3a-0001-7000-8000-000000000003',
-    };
+    const enrichedEvent = makeEnrichedEvent();
 
     // Auto-reply flush_ack whenever a flush ping arrives
     jest
@@ -155,17 +212,10 @@ describe('WorkerClient — track()', () => {
       isGranted: () => false,
       isDenied: () => false,
       isPending: () => true,
-      onChange: () => () => {
-        /**/
-      },
+      onChange: () => () => {},
     };
     new WorkerClient(
-      {
-        endpoint: 'https://x.test',
-        consent: mockConsent,
-        compress: false,
-        fetch: makeFetch(),
-      },
+      baseConfig({}),
       mockWorker as unknown as Worker,
     ).track('ev');
 
@@ -185,14 +235,7 @@ describe('WorkerClient — flush()', () => {
     const { client, mockWorker, fetchFn } = makeWorkerClient();
 
     // Simulate Worker enriching an event, then acking the flush
-    const enrichedEvent: TrackEventPayload = {
-      eid: '01975e3a-0002-7000-8000-000000000001',
-      seq: 0,
-      n: '$click',
-      ts: Date.now(),
-      sid: '01975e3a-0002-7000-8000-000000000002',
-      anon: '01975e3a-0002-7000-8000-000000000003',
-    };
+    const enrichedEvent = makeEnrichedEvent({ n: '$click' });
 
     // When the Worker receives the flush ping, reply with enriched then ack
     const origPostMessage = mockWorker.postMessage.bind(mockWorker);
@@ -201,7 +244,6 @@ describe('WorkerClient — flush()', () => {
       .mockImplementation((msg: MainToWorkerMsg) => {
         origPostMessage(msg);
         if (msg.type === 'flush') {
-          // Simulate: Worker had already processed a prior 'track' and sends enriched first
           mockWorker.simulateIncoming({
             type: 'enriched',
             event: enrichedEvent,
@@ -228,14 +270,7 @@ describe('WorkerClient — IDB replay', () => {
   it('forwards pending events from Worker to Transport', async () => {
     const { client, mockWorker, fetchFn } = makeWorkerClient();
 
-    const pendingEvent: TrackEventPayload = {
-      eid: '01975e3a-0003-7000-8000-000000000001',
-      seq: 0,
-      n: '$add_to_cart',
-      ts: Date.now(),
-      sid: '01975e3a-0003-7000-8000-000000000002',
-      anon: '01975e3a-0003-7000-8000-000000000003',
-    };
+    const pendingEvent = makeEnrichedEvent({ n: '$add_to_cart' });
 
     // Auto-reply flush_ack whenever a flush ping arrives
     jest
@@ -314,16 +349,10 @@ describe('initWithWorker — fallback', () => {
   });
 
   it('returns a WinceClient when Worker is unavailable', () => {
-    // Temporarily remove Worker from global scope
     const origWorker = (globalThis as Record<string, unknown>).Worker;
     (globalThis as Record<string, unknown>).Worker = undefined;
 
-    const result = initWithWorker({
-      endpoint: 'https://x.test',
-      consent: null,
-      compress: false,
-      fetch: makeFetch(),
-    });
+    const result = initWithWorker(baseConfig());
     expect(result).toBeInstanceOf(WinceClient);
 
     (globalThis as Record<string, unknown>).Worker = origWorker;
@@ -340,15 +369,7 @@ describe('initWithWorker — fallback', () => {
       workerCtor as unknown as typeof Worker;
 
     try {
-      const result = initWithWorker(
-        {
-          endpoint: 'https://x.test',
-          consent: null,
-          compress: false,
-          fetch: makeFetch(),
-        },
-        './tracker.worker.js',
-      );
+      const result = initWithWorker(baseConfig(), './tracker.worker.js');
 
       expect(result).toBeInstanceOf(WorkerClient);
       expect(workerCtor).toHaveBeenCalledTimes(1);
@@ -369,12 +390,7 @@ describe('initWithWorker — fallback', () => {
       }
     };
 
-    const result = initWithWorker({
-      endpoint: 'https://x.test',
-      consent: null,
-      compress: false,
-      fetch: makeFetch(),
-    });
+    const result = initWithWorker(baseConfig());
     expect(result).toBeInstanceOf(WinceClient);
 
     (globalThis as Record<string, unknown>).Worker = origWorker;
@@ -388,14 +404,6 @@ describe('initWithWorker — fallback', () => {
 
 describe('Worker handler logic', () => {
   it('enrichEvent produces a TrackEvent with required fields', () => {
-    // Test the enrichment logic directly by importing the handler module.
-    // Since we cannot run a real Worker in jsdom, we test the pure
-    // enrichment helper via the exported types contract:
-    // - eid is a UUID v7 string
-    // - seq starts at 0
-    // - ts is a recent unix ms timestamp
-    // We satisfy ourselves by checking the WorkerClient round-trip above,
-    // which exercises the same logic end-to-end in integration.
     expect(true).toBe(true); // structural placeholder
   });
 });

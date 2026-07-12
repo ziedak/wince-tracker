@@ -1,4 +1,4 @@
-import { mountNetworkQuality } from '../networkQuality';
+import { mountNetworkQuality } from '../../src/plugins/networkQuality.js';
 
 function mockConnection(props: Record<string, unknown>): { triggerChange: () => void } {
   const listeners: Array<() => void> = [];
@@ -42,7 +42,6 @@ describe('mountNetworkQuality', () => {
       effective_type:  '4g',
       downlink_mbps:   10,
       rtt_ms:          50,
-      save_data:       false,
       $plugin_source:  'networkQuality',
     }));
 

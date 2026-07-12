@@ -1,4 +1,4 @@
-import { mountFormInteraction } from '../formInteraction';
+import { mountFormInteraction } from '../../src/plugins/formInteraction.js';
 
 
 describe('mountFormInteraction', () => {

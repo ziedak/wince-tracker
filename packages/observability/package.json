@@ -17,6 +17,11 @@
     "name": "observability"
   },
   "dependencies": {
+    "@wince/utils": "*",
+    "@wince/transport": "*",
+    "@wince/types": "*"
+  },
+  "devDependencies": {
     "@nx/jest": "*"
   }
 }

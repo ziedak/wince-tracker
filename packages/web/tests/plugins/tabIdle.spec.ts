@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { mountTabIdle } from '../tabIdle';
+import { mountTabIdle } from '../../src/plugins/tabIdle.js';
 
 describe('mountTabIdle', () => {
   beforeEach(() => jest.useFakeTimers());
