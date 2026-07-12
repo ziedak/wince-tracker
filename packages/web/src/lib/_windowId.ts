@@ -1,4 +1,4 @@
-import { uuidv4 } from '@wince/core';
+import { uuidv4 } from '@wince/utils';
 
 /**
  * Tab-scoped window identifier.

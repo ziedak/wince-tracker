@@ -1,6 +1,7 @@
 export * from './lib/safeSetTimeout';
 export * from './lib/sendOutcome';
 export * from './lib/types';
+export * from './lib/clients/IHttpClient';
 export * from './lib/clients/HttpClient';
 export * from './lib/clients/beaconClient';
 export * from './lib/clients/WebSocketClient';

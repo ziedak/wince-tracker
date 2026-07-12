@@ -33,7 +33,7 @@ function mockTrackEventPayload(event: Partial<TrackEventPayload>): TrackEventPay
   };
 }
 
-/** Create transport with no-op compressFn so tests receive raw JSON strings. */
+/** Create transport with noop compressFn so tests receive raw JSON strings. */
 function makeTransport(client: IHttpClient, overrides: Partial<typeof DEFAULT_TRANSPORT_OPTIONS> = {}) {
   const noopCompress = async (input: string | ArrayBuffer | Uint8Array<ArrayBufferLike>): Promise<Uint8Array> => {
     if (typeof input === 'string') return new TextEncoder().encode(input);
@@ -46,18 +46,9 @@ function makeTransport(client: IHttpClient, overrides: Partial<typeof DEFAULT_TR
     wsUrl: '',
     compress: { enabled: false },
     exporterOpts: {
-      critical: {
-        ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.critical,
-        compressFn: noopCompress
-      },
-      high: {
-        ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.high,
-        compressFn: noopCompress
-      },
-      normal: {
-        ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.normal,
-        compressFn: noopCompress
-      }
+      critical: { ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.critical, compressFn: noopCompress },
+      high: { ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.high, compressFn: noopCompress },
+      normal: { ...DEFAULT_TRANSPORT_OPTIONS.exporterOpts.normal, compressFn: noopCompress }
     },
     ...overrides
   };

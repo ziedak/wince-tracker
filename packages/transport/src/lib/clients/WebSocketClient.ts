@@ -3,6 +3,8 @@ import type { IHttpClient, IHttpResponse } from './IHttpClient';
 
 export enum WsReceivedEvent {
   Ack = 'Ack',
+  /** Server-pushed command (intervention, config update, etc.) */
+  Command = 'Command',
   /** The WebSocket connection was closed before the server acked the request. */
   // ConnectionClosed = 'ConnectionClosed',
   /** The WebSocket connection was closed before the server acked the request. */
@@ -14,6 +16,15 @@ export interface IWSResponse {
   correlationId: string;
   status?: number;
   headers: Record<string, string>;
+  /** Present when type === Command — the command payload from server */
+  command?: ServerPushedCommand;
+}
+
+/** Command pushed from server to client via WebSocket */
+export interface ServerPushedCommand {
+  type: string;
+  payload: unknown;
+  requestId: string;
 }
 /** Default timeout awaiting a response ack (ms). */
 const DEFAULT_ACK_TIMEOUT_MS = 10_000;
@@ -62,6 +73,9 @@ export class WebSocketClient implements IHttpClient {
   private _pending = new Map<string, PendingRequest>();
   private _correlationSeq = 0;
   private _closed = false;
+
+  /** Listener for server-pushed commands (non-ack messages) */
+  private _commandListener: ((cmd: ServerPushedCommand) => void) | null = null;
 
   // Reconnect state
   private _reconnectAttempts = 0;
@@ -171,11 +185,21 @@ export class WebSocketClient implements IHttpClient {
     });
   }
 
+  /**
+   * Register a listener for server-pushed commands.
+   * When the server sends a message with type !== 'Ack', it is passed to this listener.
+   * Only one listener is supported — calling again replaces the previous one.
+   */
+  onCommand(listener: (cmd: ServerPushedCommand) => void): void {
+    this._commandListener = listener;
+  }
+
   /** Gracefully close the WebSocket connection. */
   close(): void {
     this._closed = true;
     this._clearReconnectTimer();
     this._failAllPending(new Error('WebSocketClient closed'));
+    this._commandListener = null;
 
     if (this._ws) {
       this._ws.onopen = null;
@@ -297,6 +321,14 @@ export class WebSocketClient implements IHttpClient {
             },
             body: null
           });
+          break;
+        }
+        case WsReceivedEvent.Command: {
+          // Server-pushed command — dispatch to listener if registered
+          if (this._commandListener && msg.command) {
+            this._commandListener(msg.command);
+          }
+          break;
         }
       }
     } catch {

@@ -38,6 +38,9 @@
     },
     {
       "path": "./packages/web"
+    },
+    {
+      "path": "./packages/messaging"
     }
   ]
 }

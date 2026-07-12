@@ -13,13 +13,13 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../compress/tsconfig.lib.json"
-    },
-    {
       "path": "../utils/tsconfig.lib.json"
     },
     {
       "path": "../types/tsconfig.lib.json"
+    },
+    {
+      "path": "../transport/tsconfig.lib.json"
     }
   ],
   "exclude": ["jest.config.ts", "jest.config.cts", "src/**/*.spec.ts", "src/**/*.test.ts"]

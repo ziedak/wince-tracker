@@ -109,6 +109,16 @@
         "@nx/jest": "*",
       },
     },
+    "packages/messaging": {
+      "name": "@wince/messaging",
+      "version": "0.0.1",
+      "dependencies": {
+        "@wince/transport": "*",
+        "@wince/types": "*",
+        "@wince/utils": "*",
+        "tslib": "^2.3.0",
+      },
+    },
     "packages/observability": {
       "name": "@wince/observability",
       "version": "0.0.1",
@@ -131,11 +141,14 @@
       "name": "@wince/transport",
       "version": "0.0.1",
       "dependencies": {
-        "@wince/types": "*",
-        "@wince/utils": "*",
+        "tslib": "^2.3.0",
       },
       "devDependencies": {
         "@nx/jest": "*",
+      },
+      "peerDependencies": {
+        "@wince/types": "*",
+        "@wince/utils": "*",
       },
     },
     "packages/types": {
@@ -988,6 +1001,8 @@
     "@wince/consent": ["@wince/consent@workspace:packages/consent"],
 
     "@wince/core": ["@wince/core@workspace:packages/core"],
+
+    "@wince/messaging": ["@wince/messaging@workspace:packages/messaging"],
 
     "@wince/observability": ["@wince/observability@workspace:packages/observability"],
 
