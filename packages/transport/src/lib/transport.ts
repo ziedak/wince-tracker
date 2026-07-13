@@ -6,6 +6,7 @@ import { EventPriority, TrackEventPayload } from '@wince/types';
 import { HttpClient } from './clients/HttpClient';
 import { WebSocketClient } from './clients/WebSocketClient';
 import { IHttpClient } from './clients/IHttpClient';
+import { NoPClient } from './clients/NoPCLient';
 
 export interface ITransport {
   queueSize: number;
@@ -170,3 +171,5 @@ export function createClientTransport<T extends TrackEventPayload>(
   const transport = new Transport(webSocketClient, transportOpts);
   return transport;
 }
+
+export const noPClient = new NoPClient();

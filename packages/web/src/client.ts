@@ -1,5 +1,3 @@
-import type { TransportOptions } from '@wince/transport';
-import { createClientTransport } from '@wince/transport';
 import {
   Pipeline,
   SessionManager,
@@ -9,7 +7,7 @@ import {
   type PersonProps
 } from '@wince/core';
 import { EventPriority, TrackEventPayload, StoreKind, IStorage, DropReason } from '@wince/types';
-import type { ConsentOptions, IConsent } from '@wince/consent';
+import type { IConsent } from '@wince/consent';
 import { wireConsent } from './lib/consentWire';
 import { buildBaseDiagnostics } from './lib/diagnostics';
 import { fetchEnrichment } from './lib/enrichment';
@@ -76,14 +74,9 @@ export interface WinceConfig extends BaseClientConfig {
   /** Ingest API endpoint URL. */
   endpoint: string;
 
-  /** Events per HTTP batch. Default: 20 */
-  batchSize?: number;
-  /** Max hold time for a partial batch (ms). Default: 2 000 */
-  batchTimeoutMs?: number;
   /** Gzip-compress request bodies. Default: true */
   compress?: boolean;
   /** Max events held in the in-memory buffer. Default: 500 */
-  maxBufferSize?: number;
 
   /** Session idle timeout (ms). Default: 30 minutes */
   sessionIdleTimeoutMs?: number;
@@ -101,12 +94,6 @@ export interface WinceConfig extends BaseClientConfig {
   storagePreference?: StoreKind[];
 
   /**
-   * Consent provider. Defaults to the singleton from `@wince/consent`.
-   * Pass `null` to disable consent gating entirely (e.g. for GDPR-exempt use-cases).
-   */
-  // consent: IConsent;
-
-  /**
    * Custom enrichment / filter hook — runs after core enrichment.
    * Return the (possibly modified) event to keep it, or `null`/`undefined` to drop it.
    */
@@ -114,12 +101,6 @@ export interface WinceConfig extends BaseClientConfig {
 
   /** Extra headers sent with every batch request. */
   headers?: Record<string, string>;
-
-  retry?: {
-    attempts?: number;
-    baseDelayMs?: number;
-    maxDelayMs?: number;
-  };
 
   /** Injectable fetch for testing. */
   fetch?: (url: string, init: RequestInit) => Promise<Response>;
@@ -635,9 +616,10 @@ function _batchConfigForConnection(effectiveType: string): BatchConfig | null {
  * ```
  */
 
-export function init(config: WinceConfig): WinceClient {
-  const transportOpts: TransportOptions<TrackEventPayload> = config.transportOptions;
 
+
+
+export function init(config: WinceConfig): WinceClient {
   return new WinceClient(config);
 }
 export function activatePlugins(client: WinceClient): void {

@@ -1,7 +1,7 @@
-import type { IHttpClient } from '@wince/transport';
-import { WebSocketClient, HttpClient, type ServerPushedCommand } from '@wince/transport';
+import { WebSocketClient, HttpClient, type ServerPushedCommand, NoPClient } from '@wince/transport';
 import { deserialize, isString } from '@wince/utils';
-
+import type { ILRUCache } from '@wince/types';
+import { LRUCache, LRUCacheOptions } from '@wince/cache';
 /**
  * Base command sent from backend to tracker.
  * Extend this for specific intervention types.
@@ -17,26 +17,30 @@ export interface MessagingOptions {
   wsUrl: string;
   /** HTTP URL for fallback polling when WS is unavailable */
   httpUrl: string;
-  headers?: Record<string, string>;
+  headers: HeadersInit;
   /** Timeout for WS ack and HTTP requests (ms). Default: 10_000 */
-  requestTimeoutMs?: number;
+  requestTimeoutMs: number;
   /** Called when a command is received from the server (WS or HTTP) */
   onCommand: (cmd: ServerCommand) => void | Promise<void>;
-  /** Optional fallback client (e.g. BeaconClient) for HTTP path */
-  fallback?: IHttpClient;
   /** Poll interval for HTTP fallback when WS is unavailable (ms). Default: 30_000 */
-  pollIntervalMs?: number;
+  pollIntervalMs: number;
   /** Max number of processed requestIds to keep for deduplication. Default: 1000 */
-  maxDeduplicationEntries?: number;
+
+  lRUCacheOptions: LRUCacheOptions;
 }
 
-export const DEFAULT_MESSAGING_OPTIONS = {
-  requestTimeoutMs: 10_000,
-  pollIntervalMs: 30_000,
-  maxDeduplicationEntries: 1000,
-  headers: {} as Record<string, string>,
+export const DEFAULT_MESSAGING_OPTIONS: MessagingOptions = {
+  requestTimeoutMs: 10000,
+  pollIntervalMs: 30000,
+  headers: {},
   onCommand: async () => {
     /* noop */
+  },
+  wsUrl: '',
+  httpUrl: '',
+  lRUCacheOptions: {
+    maxSize: 1000,
+    ttlMs: 60 * 60 * 1000 // request to server should be valid for 1 hour
   }
 };
 
@@ -60,11 +64,10 @@ export class MessagingClient {
   private readonly _wsClient: WebSocketClient;
   private readonly _httpClient: HttpClient;
   private readonly _httpUrl: string;
-  private readonly _headers: Record<string, string>;
+  private readonly _headers: HeadersInit;
   private readonly _onCommand: (cmd: ServerCommand) => void | Promise<void>;
   private readonly _pollIntervalMs: number;
   private readonly _requestTimeoutMs: number;
-  private readonly _maxDeduplicationEntries: number;
 
   /** WS connection state — true only when WebSocket is connected */
   private _wsConnected = false;
@@ -75,22 +78,19 @@ export class MessagingClient {
   private _started = false;
 
   /** Deduplication: tracks processed requestIds to prevent duplicate execution */
-  private _processedRequestIds = new Set<string>();
-  /** FIFO queue for deduplication entries (to enforce max size) */
-  private _deduplicationQueue: string[] = [];
+  private _processedRequestIds: ILRUCache;
 
   constructor(opts: MessagingOptions) {
-    this._httpUrl = opts.httpUrl;
-    this._headers = opts.headers ?? DEFAULT_MESSAGING_OPTIONS.headers;
-    this._onCommand = opts.onCommand;
-    this._pollIntervalMs = opts.pollIntervalMs ?? DEFAULT_MESSAGING_OPTIONS.pollIntervalMs;
-    this._requestTimeoutMs =
-      opts.requestTimeoutMs ?? DEFAULT_MESSAGING_OPTIONS.requestTimeoutMs;
-    this._maxDeduplicationEntries =
-      opts.maxDeduplicationEntries ?? DEFAULT_MESSAGING_OPTIONS.maxDeduplicationEntries;
+    const mergedOpts = { ...DEFAULT_MESSAGING_OPTIONS, ...opts };
+    this._httpUrl = mergedOpts.httpUrl;
+    this._headers = mergedOpts.headers;
+    this._onCommand = mergedOpts.onCommand;
+    this._pollIntervalMs = mergedOpts.pollIntervalMs;
+    this._requestTimeoutMs = mergedOpts.requestTimeoutMs;
 
+    this._processedRequestIds = new LRUCache(mergedOpts.lRUCacheOptions);
     // Build HTTP fallback chain: HttpClient → optional beacon
-    this._httpClient = new HttpClient(this._headers, opts.fallback);
+    this._httpClient = new HttpClient(this._headers, new NoPClient());
 
     // WS client with HTTP fallback for event delivery
     this._wsClient = new WebSocketClient(
@@ -153,7 +153,7 @@ export class MessagingClient {
     this._wsConnected = false;
     this._httpConnected = false;
     this._processedRequestIds.clear();
-    this._deduplicationQueue.length = 0;
+    // this._deduplicationQueue.clear();
   }
 
   /**
@@ -195,11 +195,10 @@ export class MessagingClient {
 
     // HTTP fallback for ack
     try {
-      await this._httpClient.post(
-        `${this._httpUrl}/ack`,
-        JSON.stringify({ requestId }),
-        { 'Content-Type': 'application/json', ...this._headers }
-      );
+      await this._httpClient.post(`${this._httpUrl}/ack`, JSON.stringify({ requestId }), {
+        'Content-Type': 'application/json',
+        ...this._headers
+      });
     } catch {
       // Ack failed — server will retry the command on next poll
     }
@@ -210,11 +209,11 @@ export class MessagingClient {
   // --------------------------------------------------------------------------
 
   private async _dispatchCommand(cmd: ServerCommand): Promise<void> {
-    // Deduplication: skip if we've already processed this requestId (bug #4)
+    // Deduplication: skip if we've already processed this requestId
     if (this._isDuplicate(cmd.requestId)) {
       return;
     }
-    this._markProcessed(cmd.requestId);
+    this._markProcessed(cmd);
 
     try {
       await this._onCommand(cmd);
@@ -229,17 +228,8 @@ export class MessagingClient {
   }
 
   /** Mark a requestId as processed, enforcing max deduplication entries */
-  private _markProcessed(requestId: string): void {
-    this._processedRequestIds.add(requestId);
-    this._deduplicationQueue.push(requestId);
-
-    // Enforce max size — remove oldest entries (FIFO eviction)
-    while (this._deduplicationQueue.length > this._maxDeduplicationEntries) {
-      const oldest = this._deduplicationQueue.shift();
-      if (oldest !== undefined) {
-        this._processedRequestIds.delete(oldest);
-      }
-    }
+  private _markProcessed(cmd: ServerCommand): void {
+    this._processedRequestIds.set(cmd.requestId, cmd);
   }
 
   // --------------------------------------------------------------------------
@@ -248,7 +238,7 @@ export class MessagingClient {
 
   private _startPolling(): void {
     this._stopPolling();
-    // Use recursive setTimeout instead of setInterval (optimization #6)
+    // Use recursive setTimeout instead of setInterval
     // This ensures we don't queue up polls if one takes longer than the interval
     const scheduleNext = () => {
       if (!this._started) return;
@@ -280,11 +270,10 @@ export class MessagingClient {
     this._polling = true;
 
     try {
-      const res = await this._httpClient.post(
-        this._httpUrl,
-        JSON.stringify({ type: 'poll' }),
-        { 'Content-Type': 'application/json', ...this._headers }
-      );
+      const res = await this._httpClient.post(this._httpUrl, JSON.stringify({ type: 'poll' }), {
+        'Content-Type': 'application/json',
+        ...this._headers
+      });
 
       if (res.ok && res.body) {
         // Parse commands from response body

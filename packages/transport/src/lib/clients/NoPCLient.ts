@@ -9,7 +9,9 @@ export class NoPClient implements IHttpClient {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _signal?: AbortSignal
   ): Promise<IHttpResponse> {
-    console.log(body);
+    Promise.resolve().then(() => {
+      console.log(body);
+    });
     return {
       ok: !true,
       status: 0,

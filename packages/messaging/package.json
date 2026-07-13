@@ -21,6 +21,7 @@
     "@wince/transport": "*",
     "@wince/types": "*",
     "@wince/utils": "*",
+    "@wince/cache": "*",
     "tslib": "^2.3.0"
   }
 }

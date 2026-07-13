@@ -40,7 +40,7 @@ export class LRUCache implements ILRUCache   {
   constructor(options: LRUCacheOptions) {
     if (options.maxSize < 1) throw new RangeError('LRUCache: maxSize must be >= 1');
     this._maxSize = options.maxSize;
-    this._ttlMs = options.ttlMs ?? 0;
+    this._ttlMs = options.ttlMs ?? 0; // 0 = never expires,
 
     // Sentinels carry no real data; key/value are never read.
     this._head = { key: '', value: '', expiresAt: 0, prev: null, next: null };

@@ -4,7 +4,7 @@ import type { IHttpClient, IHttpResponse } from './IHttpClient';
 export enum WsReceivedEvent {
   Ack = 'Ack',
   /** Server-pushed command (intervention, config update, etc.) */
-  Command = 'Command',
+  Command = 'Command'
   /** The WebSocket connection was closed before the server acked the request. */
   // ConnectionClosed = 'ConnectionClosed',
   /** The WebSocket connection was closed before the server acked the request. */
@@ -120,7 +120,7 @@ export class WebSocketClient implements IHttpClient {
   async post(
     url: string,
     body: Uint8Array | string,
-    headers: Record<string, string> = {},
+    headers: HeadersInit = {},
     signal?: AbortSignal
   ): Promise<IHttpResponse> {
     // The `url` argument is ignored — this client owns a fixed WebSocket
