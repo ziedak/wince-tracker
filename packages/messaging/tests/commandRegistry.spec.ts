@@ -80,6 +80,7 @@ describe('CommandRegistry', () => {
   it('unregisters a handler', async () => {
     const registry = new CommandRegistry();
     const handler = jest.fn();
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {/**/});
 
     registry.register('test_cmd', handler);
     expect(registry.has('test_cmd')).toBe(true);
@@ -93,6 +94,7 @@ describe('CommandRegistry', () => {
       requestId: 'req-5'
     });
 
+    warnSpy.mockRestore();
     expect(handler).not.toHaveBeenCalled();
   });
 

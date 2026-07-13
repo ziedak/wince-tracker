@@ -19,7 +19,8 @@
     { "path": "../core/tsconfig.lib.json" },
     { "path": "../storage/tsconfig.lib.json" },
     { "path": "../transport/tsconfig.lib.json" },
-    { "path": "../types/tsconfig.lib.json" }
+    { "path": "../types/tsconfig.lib.json" },
+    { "path": "../messaging/tsconfig.lib.json" }
   ],
   "exclude": ["jest.config.ts", "jest.config.cts", "src/**/*.spec.ts", "src/**/*.test.ts"]
 }

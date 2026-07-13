@@ -178,6 +178,7 @@
         "@wince/cache": "workspace:*",
         "@wince/consent": "workspace:*",
         "@wince/core": "workspace:*",
+        "@wince/messaging": "workspace:*",
         "@wince/storage": "workspace:*",
         "@wince/transport": "workspace:*",
         "@wince/types": "workspace:*",

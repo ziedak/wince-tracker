@@ -18,21 +18,25 @@ function makeMockHttpClient(responseCommands: ServerCommand[] = []): IHttpClient
   };
 }
 
-function defaultMessagingOptions(received: ServerCommand[]): MessagingOptions {
+function defaultMessagingOptions(): MessagingOptions {
   return {
     wsUrl: 'ws://localhost:8080/ws',
     httpUrl: 'http://localhost:8080/commands/poll',
-    onCommand: (c) => {
-      received.push(c);
-    },
     headers: {},
     requestTimeoutMs: 5000,
     lRUCacheOptions: {
       maxSize: 1000,
-      ttlMs: 60
+      ttlMs: 60_000
     },
     pollIntervalMs: 1000
   };
+}
+
+/** Helper: create a MessagingClient with an onCommand handler that pushes to `received` */
+function createMessagingClient(received: ServerCommand[]): MessagingClient {
+  const client = new MessagingClient(defaultMessagingOptions());
+  client.onCommand((c) => { received.push(c); });
+  return client;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,7 +51,7 @@ describe('MessagingClient — deduplication', () => {
     const received: ServerCommand[] = [];
     const cmd: ServerCommand = { type: 'show_survey', payload: null, requestId: 'dup-1' };
 
-    const messaging = new MessagingClient(defaultMessagingOptions(received));
+    const messaging = createMessagingClient(received);
 
     // Mock HTTP to return the same command twice
     let callCount = 0;
@@ -80,7 +84,7 @@ describe('MessagingClient — deduplication', () => {
   it('processes different requestIds', async () => {
     const received: ServerCommand[] = [];
 
-    const messaging = new MessagingClient(defaultMessagingOptions(received));
+    const messaging = createMessagingClient(received);
 
     const commands: ServerCommand[] = [
       { type: 'cmd1', payload: null, requestId: 'r1' },
@@ -101,9 +105,14 @@ describe('MessagingClient — deduplication', () => {
   it('enforces maxDeduplicationEntries limit', async () => {
     const received: ServerCommand[] = [];
 
-    const messaging = new MessagingClient(defaultMessagingOptions(received));
+    // Use a small cache (maxSize=3) so r1 is evicted when r4 is processed
+    const messaging = new MessagingClient({
+      ...defaultMessagingOptions(),
+      lRUCacheOptions: { maxSize: 3, ttlMs: 60_000 },
+    });
+    messaging.onCommand((c) => { received.push(c); });
 
-    // Process 4 unique commands — this evicts r1 (FIFO with max=3)
+    // Process 4 unique commands — this evicts r1 (LRU with max=3)
     const cmds1: ServerCommand[] = [
       { type: 'cmd', payload: null, requestId: 'r1' },
       { type: 'cmd', payload: null, requestId: 'r2' },
@@ -135,8 +144,7 @@ describe('MessagingClient — deduplication', () => {
 
 describe('MessagingClient — connection state', () => {
   it('connected returns false initially', () => {
-    const received: ServerCommand[] = [];
-    const messaging = new MessagingClient(defaultMessagingOptions(received));
+    const messaging = new MessagingClient(defaultMessagingOptions());
     expect(messaging.connected).toBe(false);
     expect(messaging.anyConnected).toBe(false);
     messaging.stop();
@@ -145,8 +153,7 @@ describe('MessagingClient — connection state', () => {
   it('anyConnected reflects HTTP poll state', async () => {
     jest.useFakeTimers();
     try {
-      const received: ServerCommand[] = [];
-      const messaging = new MessagingClient(defaultMessagingOptions(received));
+      const messaging = new MessagingClient(defaultMessagingOptions());
 
       const mockHttp = makeMockHttpClient([]);
       (messaging as unknown as { _httpClient: IHttpClient })._httpClient = mockHttp;
@@ -165,8 +172,7 @@ describe('MessagingClient — connection state', () => {
   });
 
   it('stop() clears all connection state', () => {
-    const received: ServerCommand[] = [];
-    const messaging = new MessagingClient(defaultMessagingOptions(received));
+    const messaging = new MessagingClient(defaultMessagingOptions());
     messaging.start();
     messaging.stop();
     expect(messaging.connected).toBe(false);

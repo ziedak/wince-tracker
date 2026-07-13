@@ -18,7 +18,6 @@ import type { PersonProps } from '@wince/core';
 import type { WinceConfig, WinceDiagnostics } from '../client';
 import { WinceClient } from '../client';
 import { fetchEnrichment } from '../lib/enrichment';
-import { applyEnrichmentOnceToEvents } from '../lib/preEnrich';
 import type { MainToWorkerMsg, WorkerToMainMsg, WorkerConfig } from './messages';
 import { buildBaseDiagnostics } from '../lib/diagnostics';
 import { BaseClient } from '../lib/baseClient';
@@ -41,8 +40,6 @@ export class WorkerClient extends BaseClient {
   private _pendingEnrichmentTimeoutMs?: number;
   private _workerAnon?: string;
   private _workerSession?: string;
-  // Enriched events buffered while the enrichment GET is in-flight.
-  private _preEnrichEventBuffer: TrackEventPayload[] = [];
 
   // idb_size_request round-trip tracking
   private _idbSizeSeq = 0;
@@ -81,16 +78,31 @@ export class WorkerClient extends BaseClient {
 
     this._attachListeners();
 
-    // Kick off enrichment or start the transport immediately.
-    // Enrichment needs anon/session IDs which live in the Worker; defer until
-    // the Worker posts back an identity_snapshot (sent after handleInit).
+    // Enrichment is non-blocking: transport starts immediately.
+    // Enrichment needs anon/session IDs which live in the Worker; defer the
+    // fire-and-forget GET until the Worker posts back identity_snapshot.
+    this._enrichmentReady = true;
     if (config.enrichmentUrl) {
       this._pendingEnrichmentUrl = config.enrichmentUrl;
       this._pendingEnrichmentTimeoutMs = config.enrichmentTimeoutMs ?? 1_500;
-      // _enrichmentReady is already false; transport stays paused until enrichment resolves.
-    } else {
-      this._maybeStart();
     }
+    this._maybeStart();
+  }
+
+  /**
+   * Handle an `identify` command pushed from the server via WebSocket (Messaging).
+   *
+   * Later commands overwrite previous identity (see architecture docs).
+   * For the Worker path, we post an `identify` message to the Worker so it
+   * updates its IdentityManager and emits a synthetic $identify event.
+   */
+  handleServerIdentify(uid: string, traits?: PersonProps): void {
+    this._post({
+      type: 'identify',
+      uid,
+      $set: traits?.$set,
+      $set_once: traits?.$set_once,
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -270,24 +282,6 @@ export class WorkerClient extends BaseClient {
       }
     } catch {
       // proceed without enrichment on error
-    } finally {
-      this._enrichmentReady = true;
-      // Flush buffered pre-enrichment events. Apply props to the first non-$identify
-      // event so UTM/cart context lands on the first user-visible event.
-      if (this._preEnrichEventBuffer.length > 0) {
-        const buffer = this._preEnrichEventBuffer;
-        this._preEnrichEventBuffer = [];
-        const { events } = applyEnrichmentOnceToEvents(
-          buffer,
-          this._enrichmentProps,
-          this._enrichmentPersonProps
-        );
-        // Clear one-shot enrichment props after applying
-        this._enrichmentProps = undefined;
-        this._enrichmentPersonProps = undefined;
-        for (const item of events) this._transport.send(item);
-      }
-      this._maybeStart();
     }
   }
 
@@ -319,13 +313,7 @@ export class WorkerClient extends BaseClient {
     switch (msg.type) {
       case 'enriched':
         // Worker has enriched + persisted the event; hand it to the HTTP transport.
-        // Buffer events that arrive before the enrichment GET resolves so props
-        // can be applied to the first real event (not auto-generated $identify).
-        if (!this._enrichmentReady) {
-          this._preEnrichEventBuffer.push(msg.event);
-        } else {
-          this._transport.send(msg.event);
-        }
+        this._transport.send(msg.event);
         break;
 
       case 'pending':

@@ -2,6 +2,7 @@ import { WebSocketClient, HttpClient, type ServerPushedCommand, NoPClient } from
 import { deserialize, isString } from '@wince/utils';
 import type { ILRUCache } from '@wince/types';
 import { LRUCache, LRUCacheOptions } from '@wince/cache';
+
 /**
  * Base command sent from backend to tracker.
  * Extend this for specific intervention types.
@@ -10,22 +11,21 @@ export interface ServerCommand {
   type: string;
   payload: unknown;
   requestId: string;
+  /** When present, this is a response to a previous request with this ID. */
+  responseTo?: string;
 }
 
 export interface MessagingOptions {
   /** WebSocket URL for primary push channel (ws:// or wss://) */
   wsUrl: string;
-  /** HTTP URL for fallback polling when WS is unavailable */
+  /** HTTP URL for fallback when WS is unavailable */
   httpUrl: string;
   headers: HeadersInit;
   /** Timeout for WS ack and HTTP requests (ms). Default: 10_000 */
   requestTimeoutMs: number;
-  /** Called when a command is received from the server (WS or HTTP) */
-  onCommand: (cmd: ServerCommand) => void | Promise<void>;
   /** Poll interval for HTTP fallback when WS is unavailable (ms). Default: 30_000 */
   pollIntervalMs: number;
   /** Max number of processed requestIds to keep for deduplication. Default: 1000 */
-
   lRUCacheOptions: LRUCacheOptions;
 }
 
@@ -33,30 +33,41 @@ export const DEFAULT_MESSAGING_OPTIONS: MessagingOptions = {
   requestTimeoutMs: 10000,
   pollIntervalMs: 30000,
   headers: {},
-  onCommand: async () => {
-    /* noop */
-  },
   wsUrl: '',
   httpUrl: '',
   lRUCacheOptions: {
     maxSize: 1000,
-    ttlMs: 60 * 60 * 1000 // request to server should be valid for 1 hour
+    ttlMs: 60 * 60 * 1000
   }
 };
 
 /**
- * Bidirectional messaging client for server→tracker command delivery.
+ * Bidirectional messaging client for server↔tracker communication.
  *
- * Primary channel: WebSocket (server pushes commands in real-time)
- * Fallback channel: HTTP long-poll (polls `/commands` endpoint when WS is down)
+ * Two primitives:
+ * - `send(msg)` — send anything to the server (WS primary, HTTP fallback)
+ * - `onCommand(handler)` — receive anything from the server
+ *
+ * Everything else (hello handshake, request-response, identify routing)
+ * is built on top of these two primitives by the application layer.
  *
  * @example
  * ```ts
  * const messaging = new MessagingClient({
  *   wsUrl: 'wss://api.example.com/ws',
- *   httpUrl: 'https://api.example.com/commands/poll',
- *   onCommand: (cmd) => registry.execute(cmd),
+ *   httpUrl: 'https://api.example.com/commands',
  * });
+ *
+ * // Receive commands from server
+ * messaging.onCommand((cmd) => {
+ *   if (cmd.type === 'identify') {
+ *     client.handleServerIdentify(cmd.payload.uid, cmd.payload.personProps);
+ *   }
+ * });
+ *
+ * // Send a message to the server
+ * messaging.send({ type: 'hello', payload: { anon: '...' }, requestId: '...' });
+ *
  * messaging.start();
  * ```
  */
@@ -65,7 +76,6 @@ export class MessagingClient {
   private readonly _httpClient: HttpClient;
   private readonly _httpUrl: string;
   private readonly _headers: HeadersInit;
-  private readonly _onCommand: (cmd: ServerCommand) => void | Promise<void>;
   private readonly _pollIntervalMs: number;
   private readonly _requestTimeoutMs: number;
 
@@ -80,22 +90,31 @@ export class MessagingClient {
   /** Deduplication: tracks processed requestIds to prevent duplicate execution */
   private _processedRequestIds: ILRUCache;
 
-  constructor(opts: MessagingOptions) {
+  /** Command handlers registered via onCommand() */
+  private _handlers: Array<(cmd: ServerCommand) => void | Promise<void>> = [];
+
+  /** Pending request() calls awaiting a responseTo match */
+  private _pendingRequests = new Map<string, {
+    resolve: (cmd: ServerCommand) => void;
+    reject: (err: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
+  constructor(opts: Partial<MessagingOptions>) {
     const mergedOpts = { ...DEFAULT_MESSAGING_OPTIONS, ...opts };
     this._httpUrl = mergedOpts.httpUrl;
     this._headers = mergedOpts.headers;
-    this._onCommand = mergedOpts.onCommand;
     this._pollIntervalMs = mergedOpts.pollIntervalMs;
     this._requestTimeoutMs = mergedOpts.requestTimeoutMs;
 
     this._processedRequestIds = new LRUCache(mergedOpts.lRUCacheOptions);
-    // Build HTTP fallback chain: HttpClient → optional beacon
+    // Build HTTP fallback chain: HttpClient → NoPClient (no-op fallback)
     this._httpClient = new HttpClient(this._headers, new NoPClient());
 
     // WS client with HTTP fallback for event delivery
     this._wsClient = new WebSocketClient(
       {
-        url: opts.wsUrl,
+        url: mergedOpts.wsUrl,
         ackTimeoutMs: this._requestTimeoutMs
       },
       this._httpClient
@@ -106,10 +125,14 @@ export class MessagingClient {
       void this._dispatchCommand({
         type: cmd.type,
         payload: cmd.payload,
-        requestId: cmd.requestId
+        requestId: cmd.requestId,
       });
     });
   }
+
+  // --------------------------------------------------------------------------
+  // Public API
+  // --------------------------------------------------------------------------
 
   /**
    * Start the messaging client.
@@ -119,20 +142,17 @@ export class MessagingClient {
     if (this._started) return;
     this._started = true;
 
-    // Try WS connection — if it succeeds, server can push commands directly.
-    // If it fails, HTTP polling starts automatically.
+    // Try WS connection
     const tryWsConnect = async () => {
       try {
         // Send a no-op to trigger WS connection
         const res = await this._wsClient.post('', new Uint8Array(), this._headers);
         if (res.ok) {
           this._wsConnected = true;
-          // WS connected — stop HTTP polling (optimization #8)
           this._stopPolling();
         }
       } catch {
         this._wsConnected = false;
-        // WS failed — ensure HTTP polling is running
         if (!this._pollTimer) {
           this._startPolling();
         }
@@ -141,7 +161,7 @@ export class MessagingClient {
 
     void tryWsConnect();
 
-    // Start HTTP polling as fallback (will be stopped if WS connects)
+    // Start HTTP polling as fallback
     this._startPolling();
   }
 
@@ -153,12 +173,110 @@ export class MessagingClient {
     this._wsConnected = false;
     this._httpConnected = false;
     this._processedRequestIds.clear();
-    // this._deduplicationQueue.clear();
+    this._handlers = [];
+  }
+
+  /**
+   * Send a message to the server.
+   *
+   * Primary channel: WebSocket (when connected)
+   * Fallback channel: HTTP POST to httpUrl
+   *
+   * @example
+   * ```ts
+   * messaging.send({ type: 'hello', payload: { anon: '...' }, requestId: 'req-1' });
+   * messaging.send({ type: 'command_ack', requestId: 'cmd-1' });
+   * ```
+   */
+  send(msg: unknown): void {
+    const body = JSON.stringify(msg);
+
+    if (this._wsConnected) {
+      // WS primary — fire-and-forget via post (which uses WS send internally)
+      void this._wsClient.post('', body, this._headers).catch(() => {
+        this._wsConnected = false;
+        // Resume polling since WS is down
+        if (this._started && !this._pollTimer) {
+          this._startPolling();
+        }
+        // Retry via HTTP
+        this._sendHttp(body);
+      });
+    } else {
+      this._sendHttp(body);
+    }
+  }
+
+  /**
+   * Register a handler for incoming commands from the server.
+   * Multiple handlers can be registered; all are called in registration order.
+   * Deduplication by requestId is applied before handlers are invoked.
+   *
+   * @returns An unsubscribe function.
+   *
+   * @example
+   * ```ts
+   * const unsub = messaging.onCommand((cmd) => {
+   *   if (cmd.type === 'identify') {
+   *     client.handleServerIdentify(cmd.payload.uid, cmd.payload.personProps);
+   *   }
+   * });
+   * // later: unsub();
+   * ```
+   */
+  onCommand(handler: (cmd: ServerCommand) => void | Promise<void>): () => void {
+    this._handlers.push(handler);
+    return () => {
+      this._handlers = this._handlers.filter((h) => h !== handler);
+    };
+  }
+
+  /**
+   * Send a request to the server and await a response.
+   *
+   * This is a convenience wrapper around `send()` + `onCommand()`:
+   * it generates a `requestId`, sends the message, and resolves when
+   * a command with `responseTo === requestId` arrives.
+   *
+   * Falls back to HTTP POST when WS is unavailable (the HTTP response
+   * body is parsed as a `ServerCommand` with `responseTo`).
+   *
+   * @example
+   * ```ts
+   * const res = await messaging.request('enrich', { anon: 'abc', session: 'xyz' });
+   * console.log(res.payload); // { uid: 'user-123', $set: { tier: 'gold' } }
+   * ```
+   */
+  async request(
+    type: string,
+    payload: unknown,
+    timeoutMs: number = this._requestTimeoutMs,
+  ): Promise<ServerCommand> {
+    const requestId = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    return new Promise<ServerCommand>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        unsub();
+        this._pendingRequests.delete(requestId);
+        reject(new Error(`[MessagingClient] request "${type}" timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      const unsub = this.onCommand((cmd) => {
+        if (cmd.responseTo === requestId) {
+          clearTimeout(timer);
+          unsub();
+          this._pendingRequests.delete(requestId);
+          resolve(cmd);
+        }
+      });
+
+      this._pendingRequests.set(requestId, { resolve, reject, timer });
+      this.send({ type, payload, requestId });
+    });
   }
 
   /**
    * Whether the WS connection is currently active.
-   * Returns true only when WebSocket is connected (not when only HTTP polling works).
    */
   get connected(): boolean {
     return this._wsConnected;
@@ -171,37 +289,17 @@ export class MessagingClient {
     return this._wsConnected || this._httpConnected;
   }
 
-  /**
-   * Send an acknowledgement back to the server that a command was received.
-   * This helps the server track which interventions were delivered.
-   * Uses WS when connected, falls back to HTTP otherwise.
-   */
-  async ack(requestId: string): Promise<void> {
-    // Skip WS if not connected — go straight to HTTP (optimization #7)
-    if (this._wsConnected) {
-      try {
-        const body = JSON.stringify({ type: 'command_ack', requestId });
-        await this._wsClient.post('', body, this._headers);
-        return;
-      } catch {
-        // WS failed — fall through to HTTP
-        this._wsConnected = false;
-        // Resume polling since WS is down
-        if (this._started && !this._pollTimer) {
-          this._startPolling();
-        }
-      }
-    }
+  // --------------------------------------------------------------------------
+  // Internal: send via HTTP
+  // --------------------------------------------------------------------------
 
-    // HTTP fallback for ack
-    try {
-      await this._httpClient.post(`${this._httpUrl}/ack`, JSON.stringify({ requestId }), {
-        'Content-Type': 'application/json',
-        ...this._headers
-      });
-    } catch {
-      // Ack failed — server will retry the command on next poll
-    }
+  private _sendHttp(body: string): void {
+    void this._httpClient.post(this._httpUrl, body, {
+      'Content-Type': 'application/json',
+      ...this._headers,
+    }).catch(() => {
+      // Send failed — best-effort
+    });
   }
 
   // --------------------------------------------------------------------------
@@ -215,19 +313,19 @@ export class MessagingClient {
     }
     this._markProcessed(cmd);
 
-    try {
-      await this._onCommand(cmd);
-    } catch (err) {
-      console.error('[MessagingClient] onCommand handler error:', err);
+    for (const handler of this._handlers) {
+      try {
+        await handler(cmd);
+      } catch (err) {
+        console.error('[MessagingClient] handler error:', err);
+      }
     }
   }
 
-  /** Check if a requestId has already been processed */
   private _isDuplicate(requestId: string): boolean {
     return this._processedRequestIds.has(requestId);
   }
 
-  /** Mark a requestId as processed, enforcing max deduplication entries */
   private _markProcessed(cmd: ServerCommand): void {
     this._processedRequestIds.set(cmd.requestId, cmd);
   }
@@ -238,8 +336,6 @@ export class MessagingClient {
 
   private _startPolling(): void {
     this._stopPolling();
-    // Use recursive setTimeout instead of setInterval
-    // This ensures we don't queue up polls if one takes longer than the interval
     const scheduleNext = () => {
       if (!this._started) return;
       this._pollTimer = setTimeout(() => {
@@ -266,7 +362,7 @@ export class MessagingClient {
   }
 
   private async _pollForCommands(): Promise<void> {
-    if (this._polling) return; // prevent overlapping polls
+    if (this._polling) return;
     this._polling = true;
 
     try {
@@ -276,7 +372,6 @@ export class MessagingClient {
       });
 
       if (res.ok && res.body) {
-        // Parse commands from response body
         const bodyText = isString(res.body)
           ? res.body
           : new TextDecoder().decode(res.body as unknown as Uint8Array);
@@ -292,14 +387,11 @@ export class MessagingClient {
           }
         }
 
-        // Mark HTTP as connected (separate from WS state — bug #3)
         this._httpConnected = true;
       } else {
         this._httpConnected = false;
       }
     } catch {
-      // Poll failed — mark HTTP as disconnected
-      // Don't touch _wsConnected — WS state is independent (bug #3)
       this._httpConnected = false;
     } finally {
       this._polling = false;

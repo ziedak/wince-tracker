@@ -43,6 +43,7 @@
     "@wince/cache": "workspace:*",
     "@wince/storage": "workspace:*",
     "@wince/types": "workspace:*",
+    "@wince/messaging": "workspace:*",
     "fflate": "*"
   },
   "nx": {

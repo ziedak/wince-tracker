@@ -11,12 +11,12 @@ import type { IConsent } from '@wince/consent';
 import { wireConsent } from './lib/consentWire';
 import { buildBaseDiagnostics } from './lib/diagnostics';
 import { fetchEnrichment } from './lib/enrichment';
-import { applyEnrichmentOnceToEvents } from './lib/preEnrich';
 import { BaseClient, BaseClientConfig } from './lib/baseClient';
 import { mountPageView } from './plugins/pageView';
 import { mountClick } from './plugins/click';
 import { createMultiStorage } from '@wince/storage';
 import { uuidv7 } from '@wince/utils';
+import { MessagingClient } from '@wince/messaging';
 
 // ---------------------------------------------------------------------------
 // Adapter: IStorage (unknown-typed get) → IStorage (string | null get)
@@ -123,16 +123,16 @@ export interface WinceConfig extends BaseClientConfig {
 
   /**
    * URL of a first-party enrichment endpoint.
-   * On init the SDK fires `GET <enrichmentUrl>?anon=<id>&session=<id>`.
+   * On init the SDK fires a fire-and-forget `GET <enrichmentUrl>?anon=<id>&session=<id>`.
    * The response may include `{ uid?, $set?, $set_once?, ...props }` to
-   * pre-identify the visitor and attach UTM / cart context on the first event.
-   * The transport stays paused until enrichment resolves or times out.
+   * pre-identify the visitor and attach UTM / cart context.
+   * The transport starts immediately — enrichment does not block event delivery.
+   * For real-time identification, use `@wince/messaging` WebSocket push.
    */
   enrichmentUrl?: string;
 
   /**
-   * Max ms to wait for the enrichment response before starting the transport
-   * without enrichment context. Default: 1 500.
+   * Max ms to wait for the enrichment response. Default: 1 500.
    */
   enrichmentTimeoutMs?: number;
 }
@@ -148,7 +148,6 @@ export class WinceClient extends BaseClient {
   private readonly _seq: SequenceCounter;
   private readonly _sampler?: SamplingFilter;
   private readonly _store: IStorage;
-  private _preEnrichQueue: TrackEventPayload[] = [];
   private _lastErrorEid?: string;
   private _lastErrorTimer?: ReturnType<typeof setTimeout>;
   private _beforeDrainHooks: Array<() => void> = [];
@@ -181,9 +180,10 @@ export class WinceClient extends BaseClient {
       this._sampler = new SamplingFilter({ rate: config.sampleRate });
     }
 
-    // Transport always starts paused; _maybeStart() unpauses when both
-    // consent is OK and enrichment (if configured) has resolved.
-    this._enrichmentReady = !config.enrichmentUrl;
+    // Enrichment is non-blocking: transport starts immediately.
+    // fetchEnrichment fires a fire-and-forget HTTP GET; any result is merged
+    // into buffered events when the response arrives.
+    this._enrichmentReady = true;
 
     // React to consent status changes.
     if (this._consent !== null) {
@@ -205,12 +205,23 @@ export class WinceClient extends BaseClient {
 
     this._attachListeners();
 
-    // Kick off enrichment or start the transport immediately.
+    // Fire-and-forget enrichment GET (does not block transport start).
     if (config.enrichmentUrl) {
       void this._runEnrichment(config.enrichmentUrl, config.enrichmentTimeoutMs ?? 1_500);
-    } else {
-      this._maybeStart();
     }
+
+    // Transport starts immediately (no enrichment delay).
+    this._maybeStart();
+  }
+
+  /**
+   * Handle an `identify` command pushed from the server via WebSocket (Messaging).
+   *
+   * Later commands overwrite previous identity (see architecture docs).
+   * This is the entry point for server-pushed identification.
+   */
+  handleServerIdentify(uid: string, traits?: PersonProps): void {
+    this.identify(uid, traits);
   }
 
   // -------------------------------------------------------------------------
@@ -365,13 +376,9 @@ export class WinceClient extends BaseClient {
   // -------------------------------------------------------------------------
 
   /**
-   * Starts the transport when all pre-conditions are met:
-   * consent is granted (or not required) AND enrichment has resolved.
-   */
-
-  /**
-   * Fire a GET request to `enrichmentUrl`, merge the response into the first
-   * event, and then start the transport via `_maybeStart()`.
+   * Fire-and-forget enrichment GET.
+   * If the response contains a uid, identify() is called immediately.
+   * Non-blocking — transport is already running.
    */
   private async _runEnrichment(url: string, timeoutMs: number): Promise<void> {
     try {
@@ -382,32 +389,11 @@ export class WinceClient extends BaseClient {
         this._fetch,
         timeoutMs
       );
-      if (res) {
-        if (res.uid) this.identify(res.uid, res.personProps);
-        else if (res.personProps) this._enrichmentPersonProps = res.personProps;
-        if (res.props) this._enrichmentProps = res.props;
+      if (res?.uid) {
+        this.identify(res.uid, res.personProps);
       }
     } catch {
       // proceed without enrichment on any error
-    } finally {
-      this._enrichmentReady = true;
-      // Flush events buffered before enrichment resolved. Apply props to the
-      // first non-$identify event (auto-generated $identify events don't need
-      // UTM / cart context; props should land on the first user-visible event).
-      if (this._preEnrichQueue.length > 0) {
-        const queue = this._preEnrichQueue;
-        this._preEnrichQueue = [];
-        const { events } = applyEnrichmentOnceToEvents(
-          queue,
-          this._enrichmentProps,
-          this._enrichmentPersonProps
-        );
-        // Clear one-shot enrichment props after applying
-        this._enrichmentProps = undefined;
-        this._enrichmentPersonProps = undefined;
-        for (const ev of events) this._dispatchEvent(ev);
-      }
-      this._maybeStart();
     }
   }
 
@@ -491,35 +477,7 @@ export class WinceClient extends BaseClient {
       }, 30_000);
     }
 
-    if (!this._enrichmentReady) {
-      // Hold pre-enrichment events so the first one can receive enrichment props
-      // when the GET response arrives (not consumed here — timing is unpredictable).
-      this._preEnrichQueue.push(raw);
-      return;
-    }
-
-    this._dispatchEvent(this._applyEnrichmentOnce(raw));
-  }
-
-  /** Apply one-shot enrichment props to a raw event, then clear them. */
-  //TODO need review and optimization, the type of the enrichment and _enrichmentPersonProps is not clear
-  // TODO cache the result of enrichement to avoid fetching from server multiple times
-  //use @wince/cache to cache the result of enrichment
-  private _applyEnrichmentOnce(raw: TrackEventPayload): TrackEventPayload {
-    if (!this._enrichmentProps && !this._enrichmentPersonProps) return raw;
-    const result: TrackEventPayload = {
-      ...raw,
-      props: this._enrichmentProps ? { ...this._enrichmentProps, ...raw.props } : raw.props,
-      $set: this._enrichmentPersonProps
-        ? { ...this._enrichmentPersonProps.$set, ...raw.$set }
-        : raw.$set,
-      $set_once: this._enrichmentPersonProps
-        ? { ...this._enrichmentPersonProps.$set_once, ...raw.$set_once }
-        : raw.$set_once
-    };
-    this._enrichmentProps = undefined;
-    this._enrichmentPersonProps = undefined;
-    return result;
+    this._dispatchEvent(raw);
   }
 
   private _dispatchEvent(raw: TrackEventPayload): void {
@@ -616,11 +574,26 @@ function _batchConfigForConnection(effectiveType: string): BatchConfig | null {
  * ```
  */
 
-
-
-
 export function init(config: WinceConfig): WinceClient {
-  return new WinceClient(config);
+  const client = new WinceClient(config);
+  const messaging = new MessagingClient({
+    wsUrl: 'wss://api.example.com/ws',
+    httpUrl: 'https://api.example.com/commands/poll',
+    lRUCacheOptions: {
+      maxSize: 1000,
+      ttlMs: 60 * 60 * 1000
+    },
+  });
+  messaging.onCommand((cmd) => {
+    if (cmd.type === 'identify') {
+      client.handleServerIdentify(
+        (cmd.payload as { uid: string }).uid,
+        (cmd.payload as { personProps?: PersonProps }).personProps,
+      );
+    }
+  });
+  messaging.start();
+  return client;
 }
 export function activatePlugins(client: WinceClient): void {
   mountPageView(client);

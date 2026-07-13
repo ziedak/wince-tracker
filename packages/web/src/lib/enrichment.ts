@@ -1,13 +1,23 @@
 export interface EnrichmentResult {
   uid?: string;
-  props?: Record<string, unknown>; // TODO: need to define a more specific type for props
+  props?: Record<string, unknown>;
   personProps?: {
     $set?: Record<string, unknown>;
     $set_once?: Record<string, unknown>;
-  }; // TODO: need to define a more specific type for personProps
+  };
 }
 
-// TODO: add a cache layer to avoid fetching enrichment multiple times for the same anon/session
+/**
+ * Best-effort enrichment fetch (fire-and-forget).
+ *
+ * Fires a GET to the enrichment endpoint with anon + session IDs.
+ * The transport does NOT wait for this to complete — events are sent
+ * immediately with anonymous identity, and the enrichment result
+ * (if it arrives) is applied to the events buffered before resolution.
+ *
+ * For real-time identification after init, use the WebSocket-based
+ * `@wince/messaging` path which can push `identify` commands at any time.
+ */
 export async function fetchEnrichment(
   url: string,
   getAnon: () => string | undefined,

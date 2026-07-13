@@ -157,6 +157,283 @@ describe('WinceClient — page()', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Enrichment — non-blocking fire-and-forget
+// ---------------------------------------------------------------------------
+
+describe('WinceClient — enrichment', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  function mockGrantedConsent(): IConsent {
+    return {
+      isGranted: () => true,
+      onChange: () => () => {},
+      optIn: () => {},
+      optOut: () => {},
+      clear: () => {},
+      isDntActive: () => false,
+      getStatus: () => ConsentStatus.GRANTED,
+      isDenied: () => false,
+      isPending: () => false,
+    };
+  }
+
+  it('fires enrichment GET on init and identifies user when uid is returned', async () => {
+    const fetchFn = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('enrich')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: { get: () => null },
+          body: null,
+          json: async () => ({ uid: 'enriched-user-123', $set: { tier: 'gold' } }),
+        } as unknown as Response);
+      }
+      // Transport fetch
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        body: null,
+      } as unknown as Response);
+    });
+    (globalThis as Record<string, unknown>).fetch = fetchFn;
+
+    const client = makeClient(
+      {
+        fetch: fetchFn,
+        enrichmentUrl: 'https://enrich.test/enrich',
+        enrichmentTimeoutMs: 500,
+      },
+      mockGrantedConsent(),
+    );
+
+    // Track an event immediately (before enrichment resolves)
+    client.track('before_enrich');
+
+    // Wait for enrichment to resolve
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Track another event after enrichment
+    client.track('after_enrich');
+    await client.flush();
+
+    // The enrichment GET should have been called
+    const enrichCall = fetchFn.mock.calls.find((c: unknown[]) => (c[0] as string).includes('enrich'));
+    expect(enrichCall).toBeDefined();
+
+    // The "after_enrich" event should carry the enriched uid
+    const transportCall = fetchFn.mock.calls.find(
+      (c: unknown[]) => !(c[0] as string).includes('enrich'),
+    );
+    expect(transportCall).toBeDefined();
+    const envelope = JSON.parse(transportCall![1].body as string) as {
+      events: TrackEventPayload[];
+    };
+    const afterEvent = envelope.events.find((e) => e.n === 'after_enrich');
+    expect(afterEvent).toBeDefined();
+    expect(afterEvent!.uid).toBe('enriched-user-123');
+
+    await client.close();
+  });
+
+  it('does not block transport when enrichmentUrl is set', async () => {
+    // Use a never-resolving enrichment to guarantee it doesn't block
+    const neverResolve = new Promise(() => {});
+    const fetchFn = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('enrich')) {
+        return neverResolve as unknown as Promise<Response>;
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        body: null,
+      } as unknown as Response);
+    });
+    (globalThis as Record<string, unknown>).fetch = fetchFn;
+
+    const client = makeClient(
+      {
+        fetch: fetchFn,
+        enrichmentUrl: 'https://enrich.test/never',
+        enrichmentTimeoutMs: 60_000,
+      },
+      mockGrantedConsent(),
+    );
+
+    // Track immediately — should be sent without waiting for enrichment
+    client.track('immediate');
+    await client.flush();
+
+    // Transport fetch should have been called even though enrichment hasn't resolved
+    const transportCall = fetchFn.mock.calls.find(
+      (c: unknown[]) => !(c[0] as string).includes('enrich'),
+    );
+    expect(transportCall).toBeDefined();
+
+    const envelope = JSON.parse(transportCall![1].body as string) as {
+      events: TrackEventPayload[];
+    };
+    expect(envelope.events).toHaveLength(1);
+    expect(envelope.events[0].n).toBe('immediate');
+    // uid should NOT be set (enrichment never resolved)
+    expect(envelope.events[0].uid).toBeUndefined();
+
+    await client.close();
+  });
+
+  it('handles enrichment failure gracefully', async () => {
+    // Enrichment returns 500 — fetchEnrichment returns undefined (no uid)
+    const fetchFn = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('enrich')) {
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          headers: { get: () => null },
+          body: null,
+          json: async () => ({}),
+        } as unknown as Response);
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        body: null,
+      } as unknown as Response);
+    });
+    (globalThis as Record<string, unknown>).fetch = fetchFn;
+
+    const client = makeClient(
+      {
+        fetch: fetchFn,
+        enrichmentUrl: 'https://enrich.test/fail',
+        enrichmentTimeoutMs: 500,
+      },
+      mockGrantedConsent(),
+    );
+
+    // Wait for enrichment to resolve (it returns ok:false → no identify)
+    await new Promise((r) => setTimeout(r, 150));
+
+    client.track('ev');
+    await client.flush();
+
+    const transportCall = fetchFn.mock.calls.find(
+      (c: unknown[]) => !(c[0] as string).includes('enrich'),
+    );
+    expect(transportCall).toBeDefined();
+    const envelope = JSON.parse(transportCall![1].body as string) as {
+      events: TrackEventPayload[];
+    };
+    // No uid — enrichment failed
+    expect(envelope.events[0].uid).toBeUndefined();
+
+    await client.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleServerIdentify — server-pushed identification via WS
+// ---------------------------------------------------------------------------
+
+describe('WinceClient — handleServerIdentify', () => {
+  function mockGrantedConsent(): IConsent {
+    return {
+      isGranted: () => true,
+      onChange: () => () => {},
+      optIn: () => {},
+      optOut: () => {},
+      clear: () => {},
+      isDntActive: () => false,
+      getStatus: () => ConsentStatus.GRANTED,
+      isDenied: () => false,
+      isPending: () => false,
+    };
+  }
+
+  it('identifies user and stamps uid on subsequent events', async () => {
+    const fetchFn = makeFetch();
+    (globalThis as Record<string, unknown>).fetch = fetchFn;
+    const client = makeClient({ fetch: fetchFn }, mockGrantedConsent());
+
+    // Before identify — no uid
+    client.track('before');
+    await client.flush();
+    fetchFn.mockClear();
+
+    // Server pushes identify
+    client.handleServerIdentify('server-user-456', { $set: { plan: 'pro' } });
+
+    // After identify — uid should be set on subsequent events
+    client.track('after');
+    await client.flush();
+
+    const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as {
+      events: TrackEventPayload[];
+    };
+    // The $identify event carries $set
+    const identifyEvent = envelope.events.find((e) => e.n === '$identify');
+    expect(identifyEvent).toBeDefined();
+    expect(identifyEvent!.uid).toBe('server-user-456');
+    expect(identifyEvent!.$set).toEqual({ plan: 'pro' });
+
+    // The regular event carries uid but not $set
+    const afterEvent = envelope.events.find((e) => e.n === 'after');
+    expect(afterEvent).toBeDefined();
+    expect(afterEvent!.uid).toBe('server-user-456');
+
+    await client.close();
+  });
+
+  it('later identify overwrites previous identity', async () => {
+    const fetchFn = makeFetch();
+    (globalThis as Record<string, unknown>).fetch = fetchFn;
+    const client = makeClient({ fetch: fetchFn }, mockGrantedConsent());
+
+    client.handleServerIdentify('user-a');
+    client.track('event_a');
+    await client.flush();
+    fetchFn.mockClear();
+
+    // Server pushes a new identify — overwrites
+    client.handleServerIdentify('user-b');
+    client.track('event_b');
+    await client.flush();
+
+    const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as {
+      events: TrackEventPayload[];
+    };
+    const eventB = envelope.events.find((e) => e.n === 'event_b');
+    expect(eventB).toBeDefined();
+    expect(eventB!.uid).toBe('user-b');
+
+    await client.close();
+  });
+
+  it('emits a $identify event when traits are provided', async () => {
+    const fetchFn = makeFetch();
+    (globalThis as Record<string, unknown>).fetch = fetchFn;
+    const client = makeClient({ fetch: fetchFn }, mockGrantedConsent());
+
+    client.handleServerIdentify('user-x', { $set: { tier: 'premium' } });
+    await client.flush();
+
+    const envelope = JSON.parse(fetchFn.mock.calls[0][1].body as string) as {
+      events: TrackEventPayload[];
+    };
+    const identifyEvent = envelope.events.find((e) => e.n === '$identify');
+    expect(identifyEvent).toBeDefined();
+    expect(identifyEvent!.uid).toBe('user-x');
+    expect(identifyEvent!.$set).toEqual({ tier: 'premium' });
+
+    await client.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // track()
 // ---------------------------------------------------------------------------
 
